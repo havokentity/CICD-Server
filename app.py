@@ -55,6 +55,10 @@ class Build(db.Model):
     log = db.Column(db.Text, default='')
     triggered_by = db.Column(db.String(100))
     payload = db.Column(db.Text, default='{}')  # Store the webhook payload as JSON string
+    total_steps = db.Column(db.Integer, default=0)
+    current_step = db.Column(db.Integer, default=0)
+    step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
+    step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
 
 class Config(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -137,7 +141,14 @@ def logout():
 def dashboard():
     builds = Build.query.order_by(Build.id.desc()).limit(10).all()
     config = Config.query.first()
-    return render_template('dashboard.html', builds=builds, config=config, build_in_progress=build_in_progress)
+
+    # Calculate progress for each build
+    builds_progress = {}
+    for build in builds:
+        builds_progress[build.id] = calculate_build_progress(build)
+
+    return render_template('dashboard.html', builds=builds, config=config, 
+                          build_in_progress=build_in_progress, builds_progress=builds_progress)
 
 @app.route('/users')
 @login_required
@@ -225,7 +236,85 @@ def config():
 @login_required
 def build_detail(build_id):
     build = Build.query.get_or_404(build_id)
-    return render_template('build_detail.html', build=build)
+
+    # Calculate progress and time information
+    progress_data = calculate_build_progress(build)
+
+    return render_template('build_detail.html', build=build, progress_data=progress_data)
+
+def calculate_build_progress(build):
+    """Calculate build progress, elapsed time, and estimated time remaining."""
+    import json
+
+    # Initialize progress data
+    progress_data = {
+        'percent': 0,
+        'current_step': build.current_step,
+        'total_steps': build.total_steps,
+        'elapsed_time': 0,
+        'estimated_remaining': None,
+        'step_times': {},
+        'step_estimates': {},
+        'steps_overdue': False
+    }
+
+    # If build hasn't started or has no steps, return default data
+    if not build.started_at or build.total_steps == 0:
+        return progress_data
+
+    # Calculate progress percentage
+    if build.total_steps > 0:
+        progress_data['percent'] = min(100, int((build.current_step / build.total_steps) * 100))
+
+    # Calculate elapsed time
+    now = datetime.datetime.utcnow()
+    elapsed = (now - build.started_at).total_seconds()
+    progress_data['elapsed_time'] = elapsed
+
+    # Parse step times and estimates
+    try:
+        step_times = json.loads(build.step_times) if build.step_times else {}
+        step_estimates = json.loads(build.step_estimates) if build.step_estimates else {}
+        progress_data['step_times'] = step_times
+        progress_data['step_estimates'] = step_estimates
+
+        # Check if any running step is taking longer than estimated
+        if build.status == 'running' and str(build.current_step - 1) in step_times:
+            current_step_idx = str(build.current_step - 1)
+            if current_step_idx in step_times and 'start' in step_times[current_step_idx]:
+                start_time = datetime.datetime.fromisoformat(step_times[current_step_idx]['start'])
+                current_duration = (now - start_time).total_seconds()
+
+                if current_step_idx in step_estimates and current_duration > step_estimates[current_step_idx]:
+                    progress_data['steps_overdue'] = True
+
+        # Calculate estimated remaining time
+        if build.status == 'running':
+            remaining_time = 0
+
+            # Add time for current step
+            if build.current_step > 0 and str(build.current_step - 1) in step_estimates:
+                current_step_idx = str(build.current_step - 1)
+                if current_step_idx in step_times and 'start' in step_times[current_step_idx]:
+                    start_time = datetime.datetime.fromisoformat(step_times[current_step_idx]['start'])
+                    elapsed_in_step = (now - start_time).total_seconds()
+                    estimated_step_time = step_estimates[current_step_idx]
+                    remaining_in_step = max(0, estimated_step_time - elapsed_in_step)
+                    remaining_time += remaining_in_step
+
+            # Add time for future steps
+            for step_idx in range(build.current_step, build.total_steps):
+                if str(step_idx) in step_estimates:
+                    remaining_time += step_estimates[str(step_idx)]
+
+            if remaining_time > 0:
+                progress_data['estimated_remaining'] = remaining_time
+
+    except (json.JSONDecodeError, ValueError, KeyError) as e:
+        # If there's an error parsing the JSON, just continue with default values
+        pass
+
+    return progress_data
 
 @app.route('/trigger_build', methods=['POST'])
 @login_required
@@ -327,7 +416,6 @@ def run_build(build_id, branch, project_path, build_steps):
         try:
             build = Build.query.get(build_id)
             build.status = 'running'
-            db.session.commit()
 
             # Parse the payload JSON
             import json
@@ -341,16 +429,51 @@ def run_build(build_id, branch, project_path, build_steps):
             # Log the payload
             log_message += f"Payload: {json.dumps(payload, indent=2)}\n\n"
 
+            # Initialize step tracking
+            steps = [s for s in build_steps.strip().split('\n') if s.strip()]
+            build.total_steps = len(steps)
+            build.current_step = 0
+            build.step_times = json.dumps({})
+
+            # Get step estimates from previous builds
+            step_estimates = {}
+            previous_build = Build.query.filter(
+                Build.status == 'success',
+                Build.id != build_id
+            ).order_by(Build.id.desc()).first()
+
+            if previous_build and previous_build.step_times:
+                try:
+                    prev_times = json.loads(previous_build.step_times)
+                    for step_idx, times in prev_times.items():
+                        if 'start' in times and 'end' in times:
+                            start_time = datetime.datetime.fromisoformat(times['start'])
+                            end_time = datetime.datetime.fromisoformat(times['end'])
+                            duration = (end_time - start_time).total_seconds()
+                            step_estimates[step_idx] = duration
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+            build.step_estimates = json.dumps(step_estimates)
             build.log = log_message
             db.session.commit()
 
             # Execute build steps
-            steps = build_steps.strip().split('\n')
             success = True
+            step_times = {}
 
-            for step in steps:
+            for step_idx, step in enumerate(steps):
                 if not step.strip():
                     continue
+
+                # Update current step
+                build.current_step = step_idx + 1
+
+                # Record step start time
+                step_start_time = datetime.datetime.utcnow()
+                step_times[str(step_idx)] = {'start': step_start_time.isoformat()}
+                build.step_times = json.dumps(step_times)
+                db.session.commit()
 
                 # Replace variables in the step with values from the payload
                 processed_step = step
@@ -391,12 +514,30 @@ def run_build(build_id, branch, project_path, build_steps):
                     if return_code != 0:
                         log_message += f"Step failed with return code {return_code}\n"
                         success = False
+
+                        # Record step end time even if it failed
+                        step_end_time = datetime.datetime.utcnow()
+                        step_times[str(step_idx)]['end'] = step_end_time.isoformat()
+                        build.step_times = json.dumps(step_times)
+                        db.session.commit()
                         break
                     else:
                         log_message += "Step completed successfully\n\n"
+
+                        # Record step end time
+                        step_end_time = datetime.datetime.utcnow()
+                        step_times[str(step_idx)]['end'] = step_end_time.isoformat()
+                        build.step_times = json.dumps(step_times)
+                        db.session.commit()
                 except Exception as e:
                     log_message += f"Error executing step: {str(e)}\n"
                     success = False
+
+                    # Record step end time even if it failed
+                    step_end_time = datetime.datetime.utcnow()
+                    step_times[str(step_idx)]['end'] = step_end_time.isoformat()
+                    build.step_times = json.dumps(step_times)
+                    db.session.commit()
                     break
 
             # Update build status

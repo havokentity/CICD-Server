@@ -48,9 +48,34 @@
                                         <span class="build-status build-status-{{ build.status }}">
                                             {{ build.status.upper() }}
                                         </span>
+                                        {% if build.status == 'running' and build.total_steps > 0 %}
+                                        <div class="mt-1">
+                                            <div class="progress" style="height: 5px;">
+                                                <div class="progress-bar {% if builds_progress[build.id].steps_overdue %}bg-warning{% endif %}" 
+                                                     role="progressbar" 
+                                                     data-progress="{{ builds_progress[build.id].percent }}"
+                                                     aria-valuenow="{{ builds_progress[build.id].percent }}" 
+                                                     aria-valuemin="0" 
+                                                     aria-valuemax="100"></div>
+                                            </div>
+                                            <small class="text-muted">{{ builds_progress[build.id].percent }}% (Step {{ build.current_step }}/{{ build.total_steps }})</small>
+                                        </div>
+                                        {% endif %}
                                     </td>
                                     <td>{{ build.branch }}</td>
-                                    <td>{{ build.started_at.strftime('%Y-%m-%d %H:%M:%S') if build.started_at else 'N/A' }}</td>
+                                    <td>
+                                        {{ build.started_at.strftime('%Y-%m-%d %H:%M:%S') if build.started_at else 'N/A' }}
+                                        {% if build.status == 'running' %}
+                                        <div class="text-muted small">
+                                            Elapsed: {{ '%d:%02d:%02d'|format(builds_progress[build.id].elapsed_time//3600, (builds_progress[build.id].elapsed_time//60)%60, builds_progress[build.id].elapsed_time%60) }}
+                                        </div>
+                                        {% if builds_progress[build.id].estimated_remaining is not none %}
+                                        <div class="text-muted small">
+                                            Est. remaining: {{ '%d:%02d:%02d'|format(builds_progress[build.id].estimated_remaining//3600, (builds_progress[build.id].estimated_remaining//60)%60, builds_progress[build.id].estimated_remaining%60) }}
+                                        </div>
+                                        {% endif %}
+                                        {% endif %}
+                                    </td>
                                     <td>{{ build.completed_at.strftime('%Y-%m-%d %H:%M:%S') if build.completed_at else 'N/A' }}</td>
                                     <td>{{ build.triggered_by }}</td>
                                     <td>
@@ -112,7 +137,14 @@
     document.addEventListener('DOMContentLoaded', function() {
         var container = document.querySelector('.container-fluid');
         var buildInProgress = container.getAttribute('data-build-in-progress') === 'true';
-        
+
+        // Set progress bar widths
+        var progressBars = document.querySelectorAll('.progress-bar');
+        progressBars.forEach(function(bar) {
+            var progress = bar.getAttribute('data-progress');
+            bar.style.width = progress + '%';
+        });
+
         if (buildInProgress) {
             setTimeout(function() {
                 window.location.reload();

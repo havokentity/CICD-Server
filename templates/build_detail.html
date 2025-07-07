@@ -48,6 +48,38 @@
                                 <th>Triggered By</th>
                                 <td>{{ build.triggered_by }}</td>
                             </tr>
+                            {% if build.total_steps > 0 %}
+                            <tr>
+                                <th>Progress</th>
+                                <td>
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span>Step {{ build.current_step }} of {{ build.total_steps }}</span>
+                                        <span>{{ progress_data.percent }}%</span>
+                                    </div>
+                                    <div class="progress">
+                                        <div class="progress-bar {% if progress_data.steps_overdue %}bg-warning{% endif %}" 
+                                             role="progressbar" 
+                                             id="build-progress-bar"
+                                             data-progress="{{ progress_data.percent }}"
+                                             aria-valuenow="{{ progress_data.percent }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100"></div>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Time</th>
+                                <td>
+                                    <div>Elapsed: {{ '%d:%02d:%02d'|format(progress_data.elapsed_time//3600, (progress_data.elapsed_time//60)%60, progress_data.elapsed_time%60) }}</div>
+                                    {% if progress_data.estimated_remaining is not none and build.status == 'running' %}
+                                    <div>Estimated remaining: {{ '%d:%02d:%02d'|format(progress_data.estimated_remaining//3600, (progress_data.estimated_remaining//60)%60, progress_data.estimated_remaining%60) }}</div>
+                                    {% endif %}
+                                    {% if progress_data.steps_overdue %}
+                                    <div class="text-warning">Current step is taking longer than expected</div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endif %}
                             <tr>
                                 <th>Payload</th>
                                 <td>
@@ -85,6 +117,13 @@
         // Auto-scroll to the bottom of the log
         var logContainer = document.querySelector('.log-container');
         logContainer.scrollTop = logContainer.scrollHeight;
+
+        // Set progress bar width
+        var progressBar = document.getElementById('build-progress-bar');
+        if (progressBar) {
+            var progress = progressBar.getAttribute('data-progress');
+            progressBar.style.width = progress + '%';
+        }
 
         // Auto-refresh the page every 5 seconds if the build is still running
         var container = document.querySelector('.container-fluid');
