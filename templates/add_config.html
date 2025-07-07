@@ -49,6 +49,14 @@
                             </div>
                         </div>
 
+                        <div class="mb-3">
+                            <label for="max_queue_length" class="form-label">Maximum Queue Length</label>
+                            <input type="number" class="form-control" id="max_queue_length" name="max_queue_length" value="5" min="1" required>
+                            <div class="form-text">
+                                The maximum number of builds that can be queued for this configuration. When the queue is full, new build requests will be rejected.
+                            </div>
+                        </div>
+
                         <button type="submit" class="btn btn-primary">Create Configuration</button>
                         <a href="{{ url_for('config') }}" class="btn btn-secondary">Cancel</a>
                     </form>

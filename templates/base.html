@@ -56,6 +56,9 @@
             color: #9c27b0;
             text-decoration: line-through;
         }
+        .build-status-queued {
+            color: #fd7e14;
+        }
         .log-container {
             background-color: #212529;
             color: #f8f9fa;
@@ -135,15 +138,15 @@
             {% endif %}
 
             <main class="{% if current_user.is_authenticated %}col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content{% else %}col-12{% endif %}">
-                {% with messages = get_flashed_messages() %}
+                {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
-                <div class="alert alert-info mt-3">
+                {% for category, message in messages %}
+                <div class="alert {% if category == 'error' %}alert-danger{% else %}alert-info{% endif %} mt-3">
                     <ul class="mb-0">
-                        {% for message in messages %}
                         <li>{{ message }}</li>
-                        {% endfor %}
                     </ul>
                 </div>
+                {% endfor %}
                 {% endif %}
                 {% endwith %}
 

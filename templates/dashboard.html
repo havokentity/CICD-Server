@@ -7,14 +7,14 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Dashboard</h2>
         <div>
-            {% if not build_in_progress %}
             <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#triggerBuildModal">
                 Trigger Build
             </button>
-            {% else %}
-            <button type="button" class="btn btn-secondary" disabled>
-                Build in Progress
-            </button>
+            {% if build_in_progress %}
+            <span class="badge bg-info ms-2">Build in progress</span>
+            {% endif %}
+            {% if queued_builds_count > 0 %}
+            <span class="badge bg-secondary ms-2">{{ queued_builds_count }} build{% if queued_builds_count > 1 %}s{% endif %} queued</span>
             {% endif %}
         </div>
     </div>
@@ -48,6 +48,11 @@
                                         <span class="build-status build-status-{{ build.status }}">
                                             {{ build.status.upper() }}
                                         </span>
+                                        {% if build.status == 'queued' and build.queue_position %}
+                                        <div class="mt-1">
+                                            <small class="text-muted">Queue position: {{ build.queue_position }}</small>
+                                        </div>
+                                        {% endif %}
                                         {% if build.status == 'running' and build.total_steps > 0 %}
                                         <div class="mt-1">
                                             <div class="progress" style="height: 5px;">
@@ -254,11 +259,9 @@
                 console.log("Builds are in progress, updating times...");
                 setTimeout(updateBuildTimes, 1000); // Update every second
             } else if (buildInProgress) {
-                console.log("Build in progress but no elapsed time elements found, will refresh page in 10 seconds");
-                // If no elements to update but build is in progress, refresh the page after a delay
-                setTimeout(function() {
-                    window.location.reload();
-                }, 10000);
+                console.log("Build in progress but no elapsed time elements found, refreshing page immediately");
+                // If no elements to update but build is in progress, refresh the page immediately
+                window.location.reload();
             } else {
                 console.log("No builds in progress or no elapsed time elements, stopping updates");
             }

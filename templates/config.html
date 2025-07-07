@@ -96,6 +96,14 @@
                         </div>
 
                         <div class="mb-3">
+                            <label for="max_queue_length" class="form-label">Maximum Queue Length</label>
+                            <input type="number" class="form-control" id="max_queue_length" name="max_queue_length" value="{{ selected_config.max_queue_length }}" min="1" required>
+                            <div class="form-text">
+                                The maximum number of builds that can be queued for this configuration. When the queue is full, new build requests will be rejected.
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
                             <label for="api_token" class="form-label">API Token</label>
                             <div class="input-group">
                                 <input type="text" class="form-control" id="api_token" value="{{ selected_config.api_token }}" readonly>

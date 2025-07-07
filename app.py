@@ -47,7 +47,7 @@ class User(UserMixin, db.Model):
 
 class Build(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    status = db.Column(db.String(20), default='pending')  # pending, running, success, failed
+    status = db.Column(db.String(20), default='pending')  # pending, running, success, failed, queued
     branch = db.Column(db.String(100))
     project_path = db.Column(db.String(500))
     started_at = db.Column(db.DateTime)
@@ -59,6 +59,7 @@ class Build(db.Model):
     current_step = db.Column(db.Integer, default=0)
     step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
     step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
+    queue_position = db.Column(db.Integer, default=None, nullable=True)  # Position in the build queue (null if not queued)
 
     # Foreign key to Config
     config_id = db.Column(db.Integer, db.ForeignKey('config.id'), nullable=False)
@@ -69,6 +70,7 @@ class Config(db.Model):
     api_token = db.Column(db.String(100), default=str(uuid.uuid4()))
     project_path = db.Column(db.String(500), default='')
     build_steps = db.Column(db.Text, default='')
+    max_queue_length = db.Column(db.Integer, default=5)  # Maximum number of builds that can be queued
 
     # Relationship with builds
     builds = db.relationship('Build', backref='config', lazy=True)
@@ -164,14 +166,18 @@ def dashboard():
         if build.status == 'running':
             running_builds_count += 1
 
+    # Count queued builds
+    queued_builds_count = Build.query.filter_by(status='queued').count()
+
     # Set build_in_progress based on whether there are any running builds
     local_build_in_progress = running_builds_count > 0 or build_in_progress
 
     # Debug logging
-    print(f"Dashboard: running_builds_count={running_builds_count}, global build_in_progress={build_in_progress}, local_build_in_progress={local_build_in_progress}")
+    print(f"Dashboard: running_builds_count={running_builds_count}, queued_builds_count={queued_builds_count}, global build_in_progress={build_in_progress}, local_build_in_progress={local_build_in_progress}")
 
     return render_template('dashboard.html', builds=builds, configs=configs, 
-                          build_in_progress=local_build_in_progress, builds_progress=builds_progress)
+                          build_in_progress=local_build_in_progress, builds_progress=builds_progress,
+                          queued_builds_count=queued_builds_count)
 
 @app.route('/users')
 @login_required
@@ -254,6 +260,15 @@ def add_config():
         name = request.form.get('name', '')
         project_path = request.form.get('project_path', '')
         build_steps = request.form.get('build_steps', '')
+        max_queue_length = request.form.get('max_queue_length', '5')
+
+        # Validate max_queue_length
+        try:
+            max_queue_length = int(max_queue_length)
+            if max_queue_length < 1:
+                max_queue_length = 5  # Default to 5 if invalid
+        except ValueError:
+            max_queue_length = 5  # Default to 5 if invalid
 
         # Check if a configuration with this name already exists
         existing_config = Config.query.filter_by(name=name).first()
@@ -266,6 +281,7 @@ def add_config():
             name=name,
             project_path=project_path,
             build_steps=build_steps,
+            max_queue_length=max_queue_length,
             api_token=str(uuid.uuid4())
         )
 
@@ -290,6 +306,15 @@ def edit_config(config_id):
         name = request.form.get('name', '')
         project_path = request.form.get('project_path', '')
         build_steps = request.form.get('build_steps', '')
+        max_queue_length = request.form.get('max_queue_length', '5')
+
+        # Validate max_queue_length
+        try:
+            max_queue_length = int(max_queue_length)
+            if max_queue_length < 1:
+                max_queue_length = 5  # Default to 5 if invalid
+        except ValueError:
+            max_queue_length = 5  # Default to 5 if invalid
 
         # Check if a configuration with this name already exists (excluding the current one)
         existing_config = Config.query.filter(Config.name == name, Config.id != config_id).first()
@@ -300,6 +325,7 @@ def edit_config(config_id):
         config.name = name
         config.project_path = project_path
         config.build_steps = build_steps
+        config.max_queue_length = max_queue_length
 
         if 'regenerate_token' in request.form:
             config.api_token = str(uuid.uuid4())
@@ -461,23 +487,48 @@ def calculate_build_progress(build):
 def trigger_build():
     global build_in_progress
 
+    config_id = request.form.get('config_id')
+    if not config_id:
+        flash('Configuration is required')
+        return redirect(url_for('dashboard'))
+
+    config = Config.query.get_or_404(config_id)
+    branch = request.form.get('branch', 'main')
+
+    # Create a simple payload with the branch
+    import json
+    payload = {'branch': branch}
+
     with build_lock:
+        # Check if a build is already in progress
         if build_in_progress:
-            flash('A build is already in progress')
+            # Check if the queue is full
+            queued_builds_count = Build.query.filter_by(status='queued').count()
+            if queued_builds_count >= config.max_queue_length:
+                flash(f'Build queue is full (max {config.max_queue_length}). Try again later.', 'error')
+                return redirect(url_for('dashboard'))
+
+            # Find the highest queue position
+            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(Build.queue_position.isnot(None)).scalar() or 0
+
+            # Add the build to the queue
+            build = Build(
+                status='queued',
+                branch=branch,
+                project_path=config.project_path,
+                triggered_by=current_user.username,
+                payload=json.dumps(payload),
+                config_id=config.id,
+                queue_position=highest_position + 1
+            )
+
+            db.session.add(build)
+            db.session.commit()
+
+            flash(f'Build queued (position {build.queue_position}) using configuration "{config.name}"')
             return redirect(url_for('dashboard'))
 
-        config_id = request.form.get('config_id')
-        if not config_id:
-            flash('Configuration is required')
-            return redirect(url_for('dashboard'))
-
-        config = Config.query.get_or_404(config_id)
-        branch = request.form.get('branch', 'main')
-
-        # Create a simple payload with the branch
-        import json
-        payload = {'branch': branch}
-
+        # No build is in progress, start this one
         build = Build(
             status='pending',
             branch=branch,
@@ -581,16 +632,49 @@ def webhook():
         else:
             return jsonify({'status': 'error', 'message': f'Configuration "{config_name}" not found'}), 404
 
+    branch = data.get('branch', 'main')
+
+    # Store the payload as a JSON string
+    import json
+    payload_json = json.dumps(data)
+
     with build_lock:
+        # Check if a build is already in progress
         if build_in_progress:
-            return jsonify({'status': 'error', 'message': 'Build already in progress'}), 409
+            # Check if the queue is full
+            queued_builds_count = Build.query.filter_by(status='queued').count()
+            if queued_builds_count >= config.max_queue_length:
+                return jsonify({
+                    'status': 'error', 
+                    'message': f'Build queue is full (max {config.max_queue_length}). Try again later.'
+                }), 429  # 429 Too Many Requests
 
-        branch = data.get('branch', 'main')
+            # Find the highest queue position
+            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(Build.queue_position.isnot(None)).scalar() or 0
 
-        # Store the payload as a JSON string
-        import json
-        payload_json = json.dumps(data)
+            # Add the build to the queue
+            build = Build(
+                status='queued',
+                branch=branch,
+                project_path=config.project_path,
+                triggered_by='webhook',
+                payload=payload_json,
+                config_id=config.id,
+                queue_position=highest_position + 1
+            )
 
+            db.session.add(build)
+            db.session.commit()
+
+            return jsonify({
+                'status': 'queued', 
+                'message': f'Build queued (position {build.queue_position}) using configuration "{config.name}"', 
+                'build_id': build.id,
+                'config': config.name,
+                'queue_position': build.queue_position
+            })
+
+        # No build is in progress, start this one
         build = Build(
             status='pending',
             branch=branch,
@@ -628,6 +712,32 @@ def get_nested_value(data, key_path):
         else:
             return None
     return value
+
+def start_next_queued_build():
+    """Start the next build in the queue if any."""
+    global build_in_progress
+
+    with app.app_context():
+        # Find the next queued build with the lowest queue position
+        next_build = Build.query.filter_by(status='queued').order_by(Build.queue_position).first()
+
+        if next_build:
+            # Update the build status and clear the queue position
+            next_build.status = 'pending'
+            next_build.started_at = datetime.datetime.utcnow()
+            next_build.queue_position = None
+            db.session.commit()
+
+            # Get the configuration for this build
+            config = Config.query.get(next_build.config_id)
+
+            # Start the build in a separate thread
+            threading.Thread(target=run_build, args=(next_build.id, next_build.branch, next_build.project_path, config.build_steps)).start()
+
+            logger.info(f"Started next queued build #{next_build.id}")
+            return True
+
+        return False
 
 def run_build(build_id, branch, project_path, build_steps):
     global build_in_progress
@@ -781,20 +891,37 @@ def run_build(build_id, branch, project_path, build_steps):
             with build_lock:
                 build_in_progress = False
 
+            # Start the next queued build if any
+            start_next_queued_build()
+
 def mark_abandoned_builds():
     """
     Mark any builds that are still in 'pending' or 'running' state as 'failed-permanently'.
+    Reset queued builds to be started again.
     This is called at server startup to handle builds that were interrupted by a server shutdown.
     """
     with app.app_context():
+        # Mark pending and running builds as failed-permanently
         abandoned_builds = Build.query.filter(Build.status.in_(['pending', 'running'])).all()
         for build in abandoned_builds:
             build.status = 'failed-permanently'
             build.completed_at = datetime.datetime.utcnow()
             build.log += f"\nBuild marked as FAILED PERMANENTLY due to server restart at {build.completed_at}\n"
-        if abandoned_builds:
+
+        # Reset queue positions for queued builds
+        # This ensures they maintain their relative order in the queue
+        queued_builds = Build.query.filter_by(status='queued').order_by(Build.queue_position).all()
+        for i, build in enumerate(queued_builds):
+            build.queue_position = i + 1
+
+        if abandoned_builds or queued_builds:
             db.session.commit()
             logger.info(f"Marked {len(abandoned_builds)} abandoned builds as failed-permanently")
+            logger.info(f"Reset queue positions for {len(queued_builds)} queued builds")
+
+        # Start the first queued build if any
+        if queued_builds:
+            start_next_queued_build()
 
 def migrate_to_multiple_configs():
     """
