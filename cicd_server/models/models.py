@@ -39,8 +39,15 @@ class Build(db.Model):
     step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
     step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
 
+    # Foreign key to Config
+    config_id = db.Column(db.Integer, db.ForeignKey('config.id'), nullable=False)
+
 class Config(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
     api_token = db.Column(db.String(100), default=str(uuid.uuid4()))
     project_path = db.Column(db.String(500), default='')
     build_steps = db.Column(db.Text, default='')
+
+    # Relationship with builds
+    builds = db.relationship('Build', backref='config', lazy=True)

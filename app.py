@@ -60,11 +60,18 @@ class Build(db.Model):
     step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
     step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
 
+    # Foreign key to Config
+    config_id = db.Column(db.Integer, db.ForeignKey('config.id'), nullable=False)
+
 class Config(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
     api_token = db.Column(db.String(100), default=str(uuid.uuid4()))
     project_path = db.Column(db.String(500), default='')
     build_steps = db.Column(db.Text, default='')
+
+    # Relationship with builds
+    builds = db.relationship('Build', backref='config', lazy=True)
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -96,11 +103,18 @@ def setup():
         user = User(username=username, is_admin=True)
         user.set_password(password)
 
-        # Create default config
-        config = Config()
+        # Check if default config already exists
+        default_config = Config.query.filter_by(name="Default Configuration").first()
+        if not default_config:
+            # Create default config if it doesn't exist
+            default_config = Config(
+                name="Default Configuration",
+                project_path="",
+                build_steps=""
+            )
+            db.session.add(default_config)
 
         db.session.add(user)
-        db.session.add(config)
         db.session.commit()
 
         flash('Admin user created successfully')
@@ -140,7 +154,7 @@ def logout():
 @login_required
 def dashboard():
     builds = Build.query.order_by(Build.id.desc()).limit(10).all()
-    config = Config.query.first()
+    configs = Config.query.all()
 
     # Calculate progress for each build
     builds_progress = {}
@@ -156,7 +170,7 @@ def dashboard():
     # Debug logging
     print(f"Dashboard: running_builds_count={running_builds_count}, global build_in_progress={build_in_progress}, local_build_in_progress={local_build_in_progress}")
 
-    return render_template('dashboard.html', builds=builds, config=config, 
+    return render_template('dashboard.html', builds=builds, configs=configs, 
                           build_in_progress=local_build_in_progress, builds_progress=builds_progress)
 
 @app.route('/users')
@@ -219,18 +233,73 @@ def delete_user(user_id):
     flash('User deleted successfully')
     return redirect(url_for('users'))
 
-@app.route('/config', methods=['GET', 'POST'])
+@app.route('/config', methods=['GET'])
 @login_required
 def config():
     if not current_user.is_admin:
         flash('Admin access required')
         return redirect(url_for('dashboard'))
 
-    config = Config.query.first()
+    configs = Config.query.all()
+    return render_template('config.html', configs=configs)
+
+@app.route('/config/add', methods=['GET', 'POST'])
+@login_required
+def add_config():
+    if not current_user.is_admin:
+        flash('Admin access required')
+        return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
-        config.project_path = request.form.get('project_path', '')
-        config.build_steps = request.form.get('build_steps', '')
+        name = request.form.get('name', '')
+        project_path = request.form.get('project_path', '')
+        build_steps = request.form.get('build_steps', '')
+
+        # Check if a configuration with this name already exists
+        existing_config = Config.query.filter_by(name=name).first()
+        if existing_config:
+            flash('A configuration with this name already exists')
+            return redirect(url_for('add_config'))
+
+        # Create a new configuration
+        config = Config(
+            name=name,
+            project_path=project_path,
+            build_steps=build_steps,
+            api_token=str(uuid.uuid4())
+        )
+
+        db.session.add(config)
+        db.session.commit()
+        flash('Configuration added successfully')
+        return redirect(url_for('config'))
+
+    return render_template('add_config.html')
+
+@app.route('/config/edit/<int:config_id>', methods=['GET', 'POST'])
+@login_required
+def edit_config(config_id):
+    if not current_user.is_admin:
+        flash('Admin access required')
+        return redirect(url_for('dashboard'))
+
+    config = Config.query.get_or_404(config_id)
+    configs = Config.query.all()
+
+    if request.method == 'POST':
+        name = request.form.get('name', '')
+        project_path = request.form.get('project_path', '')
+        build_steps = request.form.get('build_steps', '')
+
+        # Check if a configuration with this name already exists (excluding the current one)
+        existing_config = Config.query.filter(Config.name == name, Config.id != config_id).first()
+        if existing_config:
+            flash('A configuration with this name already exists')
+            return redirect(url_for('edit_config', config_id=config_id))
+
+        config.name = name
+        config.project_path = project_path
+        config.build_steps = build_steps
 
         if 'regenerate_token' in request.form:
             config.api_token = str(uuid.uuid4())
@@ -239,7 +308,34 @@ def config():
         flash('Configuration updated successfully')
         return redirect(url_for('config'))
 
-    return render_template('config.html', config=config)
+    return render_template('config.html', configs=configs, selected_config=config)
+
+@app.route('/config/delete/<int:config_id>', methods=['POST'])
+@login_required
+def delete_config(config_id):
+    if not current_user.is_admin:
+        flash('Admin access required')
+        return redirect(url_for('dashboard'))
+
+    config = Config.query.get_or_404(config_id)
+
+    # Check if this is the only configuration
+    if Config.query.count() == 1:
+        flash('Cannot delete the only configuration')
+        return redirect(url_for('config'))
+
+    # Check if there are any builds using this configuration
+    builds_count = Build.query.filter_by(config_id=config_id).count()
+    if builds_count > 0:
+        # Update builds to use another configuration
+        other_config = Config.query.filter(Config.id != config_id).first()
+        Build.query.filter_by(config_id=config_id).update({'config_id': other_config.id})
+        flash(f'Updated {builds_count} builds to use configuration "{other_config.name}"')
+
+    db.session.delete(config)
+    db.session.commit()
+    flash('Configuration deleted successfully')
+    return redirect(url_for('config'))
 
 @app.route('/build/<int:build_id>')
 @login_required
@@ -370,7 +466,12 @@ def trigger_build():
             flash('A build is already in progress')
             return redirect(url_for('dashboard'))
 
-        config = Config.query.first()
+        config_id = request.form.get('config_id')
+        if not config_id:
+            flash('Configuration is required')
+            return redirect(url_for('dashboard'))
+
+        config = Config.query.get_or_404(config_id)
         branch = request.form.get('branch', 'main')
 
         # Create a simple payload with the branch
@@ -383,7 +484,8 @@ def trigger_build():
             project_path=config.project_path,
             started_at=datetime.datetime.utcnow(),
             triggered_by=current_user.username,
-            payload=json.dumps(payload)
+            payload=json.dumps(payload),
+            config_id=config.id
         )
 
         db.session.add(build)
@@ -392,7 +494,7 @@ def trigger_build():
         # Start build in a separate thread
         threading.Thread(target=run_build, args=(build.id, branch, config.project_path, config.build_steps)).start()
 
-        flash('Build triggered successfully')
+        flash(f'Build triggered successfully using configuration "{config.name}"')
         return redirect(url_for('dashboard'))
 
 @app.route('/api/build_progress/<int:build_id>', methods=['GET'])
@@ -460,16 +562,29 @@ def webhook():
 
     # Verify API token
     token = request.headers.get('X-API-Token')
-    config = Config.query.first()
 
-    if not token or token != config.api_token:
+    # Find the configuration with the matching API token
+    config = Config.query.filter_by(api_token=token).first()
+
+    if not token or not config:
         return jsonify({'status': 'error', 'message': 'Invalid API token'}), 401
+
+    # Allow specifying a configuration by name in the payload
+    data = request.json or {}
+    config_name = data.get('config')
+
+    # If a configuration name is specified, use that configuration instead
+    if config_name:
+        specified_config = Config.query.filter_by(name=config_name).first()
+        if specified_config:
+            config = specified_config
+        else:
+            return jsonify({'status': 'error', 'message': f'Configuration "{config_name}" not found'}), 404
 
     with build_lock:
         if build_in_progress:
             return jsonify({'status': 'error', 'message': 'Build already in progress'}), 409
 
-        data = request.json or {}
         branch = data.get('branch', 'main')
 
         # Store the payload as a JSON string
@@ -482,7 +597,8 @@ def webhook():
             project_path=config.project_path,
             started_at=datetime.datetime.utcnow(),
             triggered_by='webhook',
-            payload=payload_json  # Store the payload
+            payload=payload_json,  # Store the payload
+            config_id=config.id
         )
 
         db.session.add(build)
@@ -491,7 +607,12 @@ def webhook():
         # Start build in a separate thread
         threading.Thread(target=run_build, args=(build.id, branch, config.project_path, config.build_steps)).start()
 
-        return jsonify({'status': 'success', 'message': 'Build triggered', 'build_id': build.id})
+        return jsonify({
+            'status': 'success', 
+            'message': f'Build triggered using configuration "{config.name}"', 
+            'build_id': build.id,
+            'config': config.name
+        })
 
 # Helper function to get nested values from a dictionary
 def get_nested_value(data, key_path):
@@ -675,9 +796,59 @@ def mark_abandoned_builds():
             db.session.commit()
             logger.info(f"Marked {len(abandoned_builds)} abandoned builds as failed-permanently")
 
+def migrate_to_multiple_configs():
+    """
+    Migrate from a single configuration to multiple configurations.
+
+    This function:
+    1. Checks if there's an existing configuration without a name
+    2. If found, gives it a default name
+    3. Updates existing builds to reference this configuration
+    """
+    with app.app_context():
+        # Check if there are any configurations
+        configs_count = Config.query.count()
+
+        if configs_count == 0:
+            # No configurations exist, create a default one
+            default_config = Config(
+                name="Default Configuration",
+                project_path="",
+                build_steps=""
+            )
+            db.session.add(default_config)
+            db.session.commit()
+            print(f"Created default configuration with ID {default_config.id}")
+
+            # Update existing builds to reference this configuration
+            builds_count = Build.query.filter(Build.config_id.is_(None)).update({'config_id': default_config.id})
+            db.session.commit()
+            print(f"Updated {builds_count} builds to use the default configuration")
+        else:
+            # Check for configurations without a name
+            unnamed_configs = Config.query.filter(Config.name.is_(None)).all()
+            for i, config in enumerate(unnamed_configs):
+                config.name = f"Configuration {i+1}"
+                db.session.commit()
+                print(f"Updated configuration {config.id} with name '{config.name}'")
+
+            # If there are no unnamed configurations but there are builds without a config_id,
+            # assign them to the first configuration
+            if not unnamed_configs:
+                first_config = Config.query.first()
+                if first_config:
+                    builds_count = Build.query.filter(Build.config_id.is_(None)).update({'config_id': first_config.id})
+                    db.session.commit()
+                    print(f"Updated {builds_count} builds to use configuration '{first_config.name}' (ID: {first_config.id})")
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+
+    # Run migrations
+    migrate_to_multiple_configs()
+
     # Mark any pending or running builds as failed-permanently
     mark_abandoned_builds()
+
     app.run(debug=True)

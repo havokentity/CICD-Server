@@ -34,7 +34,12 @@ def trigger_build():
             flash('A build is already in progress')
             return redirect(url_for('dashboard'))
 
-        config = Config.query.first()
+        config_id = request.form.get('config_id')
+        if not config_id:
+            flash('Configuration is required')
+            return redirect(url_for('dashboard'))
+
+        config = Config.query.get_or_404(config_id)
         branch = request.form.get('branch', 'main')
 
         # Create a simple payload with the branch
@@ -46,7 +51,8 @@ def trigger_build():
             project_path=config.project_path,
             started_at=datetime.datetime.utcnow(),
             triggered_by=current_user.username,
-            payload=json.dumps(payload)
+            payload=json.dumps(payload),
+            config_id=config.id
         )
 
         db.session.add(build)
@@ -55,5 +61,5 @@ def trigger_build():
         # Start build in a separate thread
         threading.Thread(target=run_build, args=(build.id, branch, config.project_path, config.build_steps)).start()
 
-        flash('Build triggered successfully')
+        flash(f'Build triggered successfully using configuration "{config.name}"')
         return redirect(url_for('dashboard'))

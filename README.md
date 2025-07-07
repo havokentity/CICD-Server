@@ -7,7 +7,7 @@ A lightweight Jenkins-like CICD server built with Flask and SQLite.
 - User authentication with admin privileges
 - Build management (one build at a time)
 - GitHub webhook integration
-- Configurable project settings (path, branch)
+- Multiple project configurations with different settings
 - Build steps execution with console output logging
 - Web interface for all functionality
 - Real-time build progress tracking
@@ -74,18 +74,39 @@ When you first run the application, you'll be prompted to create an admin user. 
 
 ## Configuration
 
-After logging in as an admin, you can configure the following settings:
+After logging in as an admin, you can manage multiple configurations from the Configuration page:
 
+- **Name**: A unique name to identify the configuration
 - **Project Path**: The directory where build steps will be executed
 - **Build Steps**: Commands to execute during a build (one per line)
 - **API Token**: Used to authenticate webhook requests from GitHub
+
+Each configuration has its own API token and can be selected when triggering a build manually or via webhook.
+
+### Webhook Integration
+
+When triggering builds via webhook, you can:
+
+1. Use the API token from a specific configuration in the `X-API-Token` header
+2. Optionally specify a different configuration by name in the payload using the `config` field:
+
+```json
+{
+  "branch": "main",
+  "config": "Production"
+}
+```
+
+If no configuration is specified in the payload, the one associated with the API token will be used.
 
 ## Triggering Builds
 
 Builds can be triggered in two ways:
 
-1. **Manually**: From the dashboard, click the "Trigger Build" button
+1. **Manually**: From the dashboard, click the "Trigger Build" button and select a configuration
 2. **Webhook**: Configure a GitHub webhook to send a POST request to `/api/webhook` with the API token in the `X-API-Token` header
+
+When triggering a build manually, you'll need to select which configuration to use. The configuration determines the project path and build steps that will be executed.
 
 ## User Management
 

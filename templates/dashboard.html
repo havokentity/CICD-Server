@@ -110,15 +110,19 @@
             <form action="{{ url_for('trigger_build') }}" method="post">
                 <div class="modal-body">
                     <div class="mb-3">
-                        <label for="branch" class="form-label">Branch</label>
-                        <input type="text" class="form-control" id="branch" name="branch" value="main" required>
+                        <label for="config_id" class="form-label">Configuration</label>
+                        <select class="form-select" id="config_id" name="config_id" required>
+                            {% for config in configs %}
+                            <option value="{{ config.id }}">{{ config.name }} ({{ config.project_path }})</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">
+                            Select the configuration to use for this build. You can manage configurations in the <a href="{{ url_for('config') }}">Configuration</a> page.
+                        </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Project Path</label>
-                        <input type="text" class="form-control" value="{{ config.project_path }}" readonly>
-                        <div class="form-text">
-                            Configure the project path in the <a href="{{ url_for('config') }}">Configuration</a> page.
-                        </div>
+                        <label for="branch" class="form-label">Branch</label>
+                        <input type="text" class="form-control" id="branch" name="branch" value="main" required>
                     </div>
                 </div>
                 <div class="modal-footer">

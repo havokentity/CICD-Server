@@ -40,7 +40,11 @@ def setup():
         user.set_password(password)
 
         # Create default config
-        config = Config()
+        config = Config(
+            name="Default Configuration",
+            project_path="",
+            build_steps=""
+        )
 
         db.session.add(user)
         db.session.add(config)

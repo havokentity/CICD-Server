@@ -15,7 +15,7 @@ from cicd_server.services.build_service import calculate_build_progress
 @login_required
 def dashboard():
     builds = Build.query.order_by(Build.id.desc()).limit(10).all()
-    config = Config.query.first()
+    configs = Config.query.all()
 
     # Calculate progress for each build
     builds_progress = {}
@@ -31,5 +31,5 @@ def dashboard():
     # Debug logging
     print(f"Dashboard: running_builds_count={running_builds_count}, global build_in_progress={build_in_progress}, local_build_in_progress={local_build_in_progress}")
 
-    return render_template('dashboard.html', builds=builds, config=config, 
+    return render_template('dashboard.html', builds=builds, configs=configs, 
                           build_in_progress=local_build_in_progress, builds_progress=builds_progress)
