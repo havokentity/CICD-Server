@@ -32,7 +32,9 @@ def api_build_progress(build_id):
             )
         },
         'steps_overdue': progress_data['steps_overdue'],
-        'status': build.status
+        'status': build.status,
+        'config_id': build.config_id,
+        'config_name': build.config.name
     }
 
     # Add estimated remaining time if available
@@ -63,7 +65,9 @@ def api_build_log(build_id):
         'log': build.log,
         'status': build.status,
         'current_step': build.current_step,
-        'total_steps': build.total_steps
+        'total_steps': build.total_steps,
+        'config_id': build.config_id,
+        'config_name': build.config.name
     })
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'

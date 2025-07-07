@@ -152,11 +152,12 @@ def run_build(build_id, branch, project_path, build_steps):
             build.current_step = 0
             build.step_times = json.dumps({})
 
-            # Get step estimates from previous builds
+            # Get step estimates from previous builds with the same configuration
             step_estimates = {}
             previous_build = Build.query.filter(
                 Build.status == 'success',
-                Build.id != build_id
+                Build.id != build_id,
+                Build.config_id == build.config_id  # Filter by the same configuration
             ).order_by(Build.id.desc()).first()
 
             if previous_build and previous_build.step_times:

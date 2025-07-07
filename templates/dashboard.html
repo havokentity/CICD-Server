@@ -36,6 +36,7 @@
                                 <tr>
                                     <th>ID</th>
                                     <th>Status</th>
+                                    <th>Configuration</th>
                                     <th>Branch</th>
                                     <th>Started</th>
                                     <th>Completed</th>
@@ -70,6 +71,7 @@
                                         </div>
                                         {% endif %}
                                     </td>
+                                    <td>{{ build.config.name }}</td>
                                     <td>{{ build.branch }}</td>
                                     <td>
                                         {{ build.started_at.strftime('%Y-%m-%d %H:%M:%S') if build.started_at else 'N/A' }}
