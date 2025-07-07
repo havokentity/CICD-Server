@@ -518,10 +518,10 @@ def trigger_build():
     with build_lock:
         # Check if a build is already in progress
         if build_in_progress:
-            # Check if the queue is full
-            queued_builds_count = Build.query.filter_by(status='queued').count()
+            # Check if the queue is full for this specific configuration
+            queued_builds_count = Build.query.filter_by(status='queued', config_id=config.id).count()
             if queued_builds_count >= config.max_queue_length:
-                flash(f'Build queue is full (max {config.max_queue_length}). Try again later.', 'error')
+                flash(f'Build queue for "{config.name}" is full (max {config.max_queue_length}). Try again later.', 'error')
                 return redirect(url_for('dashboard'))
 
             # Find the highest queue position
@@ -657,12 +657,12 @@ def webhook():
     with build_lock:
         # Check if a build is already in progress
         if build_in_progress:
-            # Check if the queue is full
-            queued_builds_count = Build.query.filter_by(status='queued').count()
+            # Check if the queue is full for this specific configuration
+            queued_builds_count = Build.query.filter_by(status='queued', config_id=config.id).count()
             if queued_builds_count >= config.max_queue_length:
                 return jsonify({
                     'status': 'error', 
-                    'message': f'Build queue is full (max {config.max_queue_length}). Try again later.'
+                    'message': f'Build queue for "{config.name}" is full (max {config.max_queue_length}). Try again later.'
                 }), 429  # 429 Too Many Requests
 
             # Find the highest queue position
@@ -785,11 +785,12 @@ def run_build(build_id, branch, project_path, build_steps):
             build.current_step = 0
             build.step_times = json.dumps({})
 
-            # Get step estimates from previous builds
+            # Get step estimates from previous builds with the same configuration
             step_estimates = {}
             previous_build = Build.query.filter(
                 Build.status == 'success',
-                Build.id != build_id
+                Build.id != build_id,
+                Build.config_id == build.config_id  # Filter by the same configuration
             ).order_by(Build.id.desc()).first()
 
             if previous_build and previous_build.step_times:
