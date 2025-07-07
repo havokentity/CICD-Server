@@ -497,7 +497,7 @@ def run_build(build_id, branch, project_path, build_steps):
                         db.session.commit()
                         break
                     else:
-                        log_message += "Step completed successfully\n\n"
+                        log_message += f"Step {build.current_step}/{build.total_steps} completed successfully\n\n"
 
                         # Record step end time
                         step_end_time = datetime.datetime.utcnow()
