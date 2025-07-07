@@ -14,7 +14,7 @@
     </div>
 
     <div class="row mb-4">
-        <div class="col-12">
+        <div class="col-md-8">
             <div class="card">
                 <div class="card-header">
                     <h5 class="mb-0">Available Configurations</h5>
@@ -59,13 +59,9 @@
                     {% endif %}
                 </div>
             </div>
-        </div>
-    </div>
 
-    {% if selected_config %}
-    <div class="row">
-        <div class="col-md-8">
-            <div class="card">
+            {% if selected_config %}
+            <div class="card mt-4">
                 <div class="card-header">
                     <h5 class="mb-0">Edit Configuration: {{ selected_config.name }}</h5>
                 </div>
@@ -125,8 +121,8 @@
                     </form>
                 </div>
             </div>
+            {% endif %}
         </div>
-    {% endif %}
 
         <div class="col-md-4">
             <div class="card">
@@ -170,6 +166,7 @@ echo "Repository: ${repository.name} owned by ${repository.owner}"</code></pre>
             </div>
         </div>
     </div>
+
 </div>
     <!-- Delete Configuration Modals -->
     {% for config in configs %}
