@@ -271,9 +271,37 @@ def calculate_build_progress(build):
     if not build.started_at or build.total_steps == 0:
         return progress_data
 
+    # Initialize step_times and step_estimates
+    step_times = json.loads(build.step_times) if build.step_times else {}
+    step_estimates = json.loads(build.step_estimates) if build.step_estimates else {}
+
     # Calculate progress percentage
     if build.total_steps > 0:
-        progress_data['percent'] = min(100, int((build.current_step / build.total_steps) * 100))
+        # Calculate base progress from completed steps
+        completed_steps_percent = 0
+        if build.current_step > 0:
+            completed_steps_percent = ((build.current_step - 1) / build.total_steps) * 100
+
+        # Calculate progress of current step based on elapsed time vs estimated time
+        current_step_percent = 0
+        if build.status == 'running' and build.current_step > 0 and build.current_step <= build.total_steps:
+            try:
+                current_step_idx = str(build.current_step - 1)
+                if current_step_idx in step_times and 'start' in step_times[current_step_idx]:
+                    start_time = datetime.datetime.fromisoformat(step_times[current_step_idx]['start'])
+                    now = datetime.datetime.utcnow()
+                    elapsed_in_step = (now - start_time).total_seconds()
+
+                    # If we have an estimate for this step, use it to calculate progress
+                    if current_step_idx in step_estimates:
+                        estimated_step_time = step_estimates[current_step_idx]
+                        step_progress_ratio = min(1.0, elapsed_in_step / estimated_step_time)
+                        current_step_percent = (step_progress_ratio / build.total_steps) * 100
+            except (ValueError, KeyError, ZeroDivisionError):
+                pass
+
+        # Combine completed steps and current step progress
+        progress_data['percent'] = min(100, int(completed_steps_percent + current_step_percent))
 
     # Calculate elapsed time
     if build.status in ['success', 'failed', 'failed-permanently'] and build.completed_at:
@@ -285,10 +313,8 @@ def calculate_build_progress(build):
         elapsed = (now - build.started_at).total_seconds()
     progress_data['elapsed_time'] = elapsed
 
-    # Parse step times and estimates
+    # Store step times and estimates in progress_data
     try:
-        step_times = json.loads(build.step_times) if build.step_times else {}
-        step_estimates = json.loads(build.step_estimates) if build.step_estimates else {}
         progress_data['step_times'] = step_times
         progress_data['step_estimates'] = step_estimates
 
