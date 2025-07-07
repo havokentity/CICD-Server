@@ -13,6 +13,7 @@ import os
 import uuid
 import logging
 import threading
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -26,6 +27,19 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Add built-in functions to Jinja2 environment
 app.jinja_env.globals.update(max=max, min=min)
+
+# Add custom filters to Jinja2 environment
+def pretty_json(value):
+    """Format a JSON string to be more readable with proper indentation."""
+    try:
+        # Parse the JSON string and format it with indentation
+        parsed = json.loads(value)
+        return json.dumps(parsed, indent=4, sort_keys=True)
+    except:
+        # If parsing fails, return the original string
+        return value
+
+app.jinja_env.filters['pretty_json'] = pretty_json
 
 # Initialize database
 db = SQLAlchemy(app)
