@@ -24,8 +24,23 @@ def send_progress_updates(build_id, stop_event):
                 # Get the latest build data from the database
                 build = Build.query.get(build_id)
 
-                # If build doesn't exist or is no longer running, stop sending updates
-                if not build or build.status not in ['running', 'pending']:
+                # If build doesn't exist, stop sending updates
+                if not build:
+                    break
+
+                # Handle queued builds differently
+                if build.status == 'queued':
+                    # For queued builds, just send the status and queue position
+                    socketio.emit('build_progress_update', {
+                        'build_id': build.id,
+                        'status': build.status,
+                        'queue_position': build.queue_position
+                    })
+                    time.sleep(1)  # Sleep for 1 second before the next update
+                    continue
+
+                # If build is not running or pending, stop sending updates
+                if build.status not in ['running', 'pending']:
                     break
 
                 # Skip sending updates if the build data is invalid (e.g., during database updates)

@@ -233,20 +233,140 @@
         // Listen for build status updates
         socket.on('build_status_update', function(data) {
             console.log('Received build status update:', data);
+            console.log('Current DOM state for build ' + data.build_id + ':', document.querySelector('tr[data-build-id="' + data.build_id + '"]') ? 'exists' : 'not found');
 
+            // Find the row for this build
+            const row = document.querySelector(`tr[data-build-id="${data.build_id}"]`);
+
+            // If the build doesn't exist in the table yet and it's not a webhook-triggered build, we need to add it
+            if (!row && data.status === 'running' && data.triggered_by !== 'webhook') {
+                console.log('Adding new build to table from status update:', data.build_id);
+
+                // Create a new row for this build
+                const newRow = document.createElement('tr');
+                newRow.setAttribute('data-build-id', data.build_id);
+
+                // Create and append cells
+                // ID cell
+                const idCell = document.createElement('td');
+                idCell.textContent = data.build_id;
+                newRow.appendChild(idCell);
+
+                // Status cell
+                const statusCell = document.createElement('td');
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'build-status build-status-' + data.status;
+                statusSpan.textContent = data.status.toUpperCase();
+                statusCell.appendChild(statusSpan);
+
+                // Add progress bar if running
+                if (data.status === 'running') {
+                    const progressDiv = document.createElement('div');
+                    progressDiv.className = 'mt-1';
+
+                    const progressBarContainer = document.createElement('div');
+                    progressBarContainer.className = 'progress';
+                    progressBarContainer.style.height = '5px';
+
+                    const progressBar = document.createElement('div');
+                    progressBar.className = 'progress-bar';
+                    progressBar.setAttribute('role', 'progressbar');
+                    progressBar.setAttribute('data-progress', '0');
+                    progressBar.setAttribute('aria-valuenow', '0');
+                    progressBar.setAttribute('aria-valuemin', '0');
+                    progressBar.setAttribute('aria-valuemax', '100');
+                    progressBar.style.width = '0%';
+
+                    progressBarContainer.appendChild(progressBar);
+                    progressDiv.appendChild(progressBarContainer);
+
+                    const progressText = document.createElement('small');
+                    progressText.className = 'text-muted';
+                    progressText.textContent = '0% (Step 0/0)';
+                    progressDiv.appendChild(progressText);
+
+                    statusCell.appendChild(progressDiv);
+                }
+                newRow.appendChild(statusCell);
+
+                // Config name cell
+                const configCell = document.createElement('td');
+                configCell.textContent = data.config_name || 'Unknown';
+                newRow.appendChild(configCell);
+
+                // Branch cell
+                const branchCell = document.createElement('td');
+                branchCell.textContent = data.branch || 'Unknown';
+                newRow.appendChild(branchCell);
+
+                // Started at cell
+                const startedCell = document.createElement('td');
+                startedCell.textContent = new Date().toLocaleString();
+
+                // Add elapsed time
+                const elapsedDiv = document.createElement('div');
+                elapsedDiv.className = 'text-muted small build-elapsed-time';
+                elapsedDiv.setAttribute('data-build-id', data.build_id);
+                elapsedDiv.textContent = 'Elapsed: 00:00:00';
+                startedCell.appendChild(elapsedDiv);
+
+                // Add estimated time element (even if no data yet)
+                const estimatedDiv = document.createElement('div');
+                estimatedDiv.className = 'text-muted small build-estimated-time';
+                estimatedDiv.setAttribute('data-build-id', data.build_id);
+                estimatedDiv.textContent = 'Est. remaining: calculating...';
+                startedCell.appendChild(estimatedDiv);
+                console.log('Created estimated time element for build ' + data.build_id + ' in status update');
+
+                newRow.appendChild(startedCell);
+
+                // Completed at cell
+                const completedCell = document.createElement('td');
+                completedCell.textContent = 'N/A';
+                newRow.appendChild(completedCell);
+
+                // Triggered by cell
+                const triggeredCell = document.createElement('td');
+                triggeredCell.textContent = data.triggered_by || 'Unknown';
+                newRow.appendChild(triggeredCell);
+
+                // Actions cell
+                const actionsCell = document.createElement('td');
+                const viewLink = document.createElement('a');
+                viewLink.href = '/build/' + data.build_id;
+                viewLink.className = 'btn btn-sm btn-info';
+                viewLink.textContent = 'View Details';
+                actionsCell.appendChild(viewLink);
+                newRow.appendChild(actionsCell);
+
+                // Add the new row to the table
+                const tbody = document.querySelector('tbody');
+                if (tbody) {
+                    // Insert at the top of the table
+                    if (tbody.firstChild) {
+                        tbody.insertBefore(newRow, tbody.firstChild);
+                    } else {
+                        tbody.appendChild(newRow);
+                    }
+                }
+
+                // Set buildInProgress to true
+                buildInProgress = true;
+            } 
             // If we have a new build and it was triggered by a webhook, refresh the page
-            if (data.build_id > latestBuildId && data.triggered_by === 'webhook') {
-                console.log('New build detected via WebSocket! Refreshing page...');
+            else if (data.build_id > latestBuildId && data.triggered_by === 'webhook') {
+                console.log('New webhook build detected via WebSocket! Refreshing page...');
                 window.location.reload();
             }
-            // If the status of an existing build in the table has changed, update it
-            else {
+            // If the build exists in the table, update it
+            else if (row) {
                 updateBuildInTable(data);
-                // Update latestBuildId if this build ID is higher
-                if (data.build_id > latestBuildId) {
-                    latestBuildId = data.build_id;
-                    console.log('Updated latest build ID:', latestBuildId);
-                }
+            }
+
+            // Update latestBuildId if this build ID is higher
+            if (data.build_id > latestBuildId) {
+                latestBuildId = data.build_id;
+                console.log('Updated latest build ID:', latestBuildId);
             }
         });
 
@@ -262,17 +382,70 @@
             console.log('Updating build in table:', data.build_id);
 
             // Update status
-            const statusCell = row.querySelector('.build-status');
-            if (statusCell) {
+            const statusCell = row.querySelector('.build-status').parentNode;
+            const statusSpan = row.querySelector('.build-status');
+            if (statusSpan) {
                 // Remove all status classes
-                statusCell.classList.forEach(cls => {
+                statusSpan.classList.forEach(cls => {
                     if (cls.startsWith('build-status-')) {
-                        statusCell.classList.remove(cls);
+                        statusSpan.classList.remove(cls);
                     }
                 });
                 // Add the new status class
-                statusCell.classList.add('build-status-' + data.status);
-                statusCell.textContent = data.status.toUpperCase();
+                statusSpan.classList.add('build-status-' + data.status);
+                statusSpan.textContent = data.status.toUpperCase();
+            }
+
+            // If the build is transitioning from queued to running, add progress bar
+            if (data.status === 'running' && statusCell) {
+                // Check if we already have a progress bar
+                const existingProgressBar = statusCell.querySelector('.progress');
+                if (!existingProgressBar) {
+                    console.log('Adding progress bar for build transitioning from queued to running:', data.build_id);
+
+                    // Remove any queue position text
+                    const queuePositionText = statusCell.querySelector('small.text-muted');
+                    if (queuePositionText) {
+                        queuePositionText.remove();
+                    }
+
+                    // Create progress bar elements
+                    const progressDiv = document.createElement('div');
+                    progressDiv.className = 'mt-1';
+
+                    const progressBarContainer = document.createElement('div');
+                    progressBarContainer.className = 'progress';
+                    progressBarContainer.style.height = '5px';
+
+                    const progressBar = document.createElement('div');
+                    progressBar.className = 'progress-bar';
+                    if (data.steps_overdue) {
+                        progressBar.classList.add('bg-warning');
+                    }
+
+                    // Set initial progress values
+                    const percent = data.percent || 0;
+                    const currentStep = data.current_step || 1;
+                    const totalSteps = data.total_steps || 5;
+
+                    progressBar.setAttribute('role', 'progressbar');
+                    progressBar.setAttribute('data-progress', percent);
+                    progressBar.setAttribute('aria-valuenow', percent);
+                    progressBar.setAttribute('aria-valuemin', '0');
+                    progressBar.setAttribute('aria-valuemax', '100');
+                    progressBar.style.width = percent + '%';
+
+                    progressBarContainer.appendChild(progressBar);
+                    progressDiv.appendChild(progressBarContainer);
+
+                    const progressText = document.createElement('small');
+                    progressText.className = 'text-muted';
+                    progressText.textContent = percent + '% (Step ' + currentStep + '/' + totalSteps + ')';
+                    progressDiv.appendChild(progressText);
+
+                    statusCell.appendChild(progressDiv);
+                    console.log('Progress bar added for build:', data.build_id);
+                }
             }
 
             // If the build is completed, update the completed_at cell
@@ -281,12 +454,22 @@
                 if (completedCell && completedCell.textContent.trim() === 'N/A') {
                     completedCell.textContent = new Date(data.completed_at).toLocaleString();
                 }
+
+                // If the build is successful, remove the estimated time element
+                if (data.status === 'success') {
+                    const estimatedElement = document.querySelector('.build-estimated-time[data-build-id="' + data.build_id + '"]');
+                    if (estimatedElement) {
+                        console.log('Build ' + data.build_id + ' is successful, removing estimated time element');
+                        estimatedElement.remove();
+                    }
+                }
             }
         }
 
         // Listen for build progress updates via WebSocket
         socket.on('build_progress_update', function(data) {
             console.log('Received build progress update via WebSocket:', data);
+            console.log('Current DOM state for build ' + data.build_id + ':', document.querySelector('tr[data-build-id="' + data.build_id + '"]') ? 'exists' : 'not found');
 
             // Validate the data before processing
             if (!data || !data.build_id || !data.current_step || !data.total_steps || data.current_step <= 0 || data.total_steps <= 0) {
@@ -294,22 +477,213 @@
                 return;
             }
 
-            // Find the element for this build
-            var element = document.querySelector('.build-elapsed-time[data-build-id="' + data.build_id + '"]');
-            if (!element) {
-                console.log('Build elapsed time element not found:', data.build_id);
-                return;
+            // Find the row for this build
+            var row = document.querySelector('tr[data-build-id="' + data.build_id + '"]');
+
+            // If the build doesn't exist in the table yet, we need to add it
+            if (!row && data.status === 'running') {
+                console.log('Adding new build to table:', data.build_id);
+
+                // Create a new row for this build
+                row = document.createElement('tr');
+                row.setAttribute('data-build-id', data.build_id);
+
+                // Create and append cells
+                // ID cell
+                var idCell = document.createElement('td');
+                idCell.textContent = data.build_id;
+                row.appendChild(idCell);
+
+                // Status cell
+                var statusCell = document.createElement('td');
+                var statusSpan = document.createElement('span');
+                statusSpan.className = 'build-status build-status-' + data.status;
+                statusSpan.textContent = data.status.toUpperCase();
+                statusCell.appendChild(statusSpan);
+
+                // Add progress bar
+                if (data.status === 'running') {
+                    var progressDiv = document.createElement('div');
+                    progressDiv.className = 'mt-1';
+
+                    var progressBarContainer = document.createElement('div');
+                    progressBarContainer.className = 'progress';
+                    progressBarContainer.style.height = '5px';
+
+                    var progressBar = document.createElement('div');
+                    progressBar.className = 'progress-bar';
+                    if (data.steps_overdue) {
+                        progressBar.classList.add('bg-warning');
+                    }
+                    progressBar.setAttribute('role', 'progressbar');
+                    progressBar.setAttribute('data-progress', data.percent);
+                    progressBar.setAttribute('aria-valuenow', data.percent);
+                    progressBar.setAttribute('aria-valuemin', '0');
+                    progressBar.setAttribute('aria-valuemax', '100');
+                    progressBar.style.width = data.percent + '%';
+
+                    progressBarContainer.appendChild(progressBar);
+                    progressDiv.appendChild(progressBarContainer);
+
+                    var progressText = document.createElement('small');
+                    progressText.className = 'text-muted';
+                    progressText.textContent = data.percent + '% (Step ' + data.current_step + '/' + data.total_steps + ')';
+                    progressDiv.appendChild(progressText);
+
+                    statusCell.appendChild(progressDiv);
+                }
+                row.appendChild(statusCell);
+
+                // Config name cell
+                var configCell = document.createElement('td');
+                configCell.textContent = data.config_name || 'Unknown';
+                row.appendChild(configCell);
+
+                // Branch cell
+                var branchCell = document.createElement('td');
+                branchCell.textContent = data.branch || 'Unknown';
+                row.appendChild(branchCell);
+
+                // Started at cell
+                var startedCell = document.createElement('td');
+                startedCell.textContent = new Date().toLocaleString();
+
+                // Add elapsed time
+                var elapsedDiv = document.createElement('div');
+                elapsedDiv.className = 'text-muted small build-elapsed-time';
+                elapsedDiv.setAttribute('data-build-id', data.build_id);
+                elapsedDiv.textContent = 'Elapsed: ' + (data.elapsed_time ? data.elapsed_time.formatted : '00:00:00');
+                startedCell.appendChild(elapsedDiv);
+
+                // Always add estimated time element (even if no data yet)
+                var estimatedDiv = document.createElement('div');
+                estimatedDiv.className = 'text-muted small build-estimated-time';
+                estimatedDiv.setAttribute('data-build-id', data.build_id);
+                if (data.estimated_remaining && data.estimated_remaining.formatted) {
+                    estimatedDiv.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
+                } else {
+                    estimatedDiv.textContent = 'Est. remaining: calculating...';
+                }
+                startedCell.appendChild(estimatedDiv);
+                console.log('Created estimated time element for build ' + data.build_id + ' in progress update');
+
+                row.appendChild(startedCell);
+
+                // Completed at cell
+                var completedCell = document.createElement('td');
+                completedCell.textContent = 'N/A';
+                row.appendChild(completedCell);
+
+                // Triggered by cell
+                var triggeredCell = document.createElement('td');
+                triggeredCell.textContent = data.triggered_by || 'Unknown';
+                row.appendChild(triggeredCell);
+
+                // Actions cell
+                var actionsCell = document.createElement('td');
+                var viewLink = document.createElement('a');
+                viewLink.href = '/build/' + data.build_id;
+                viewLink.className = 'btn btn-sm btn-info';
+                viewLink.textContent = 'View Details';
+                actionsCell.appendChild(viewLink);
+                row.appendChild(actionsCell);
+
+                // Add the new row to the table
+                var tbody = document.querySelector('tbody');
+                if (tbody) {
+                    // Insert at the top of the table
+                    if (tbody.firstChild) {
+                        tbody.insertBefore(row, tbody.firstChild);
+                    } else {
+                        tbody.appendChild(row);
+                    }
+                }
+
+                // Update the latest build ID
+                if (data.build_id > latestBuildId) {
+                    latestBuildId = data.build_id;
+                    console.log('Updated latest build ID:', latestBuildId);
+                }
+
+                // Set buildInProgress to true
+                buildInProgress = true;
+
+                // Find the element for this build now that we've created it
+                var element = elapsedDiv;
+            } else {
+                // Find the element for this build
+                var element = document.querySelector('.build-elapsed-time[data-build-id="' + data.build_id + '"]');
+                if (!element) {
+                    console.log('Build elapsed time element not found:', data.build_id);
+
+                    // If we have a row but no elapsed time element, create one
+                    if (row) {
+                        console.log('Creating missing elapsed time element for existing build ' + data.build_id);
+                        var startedCell = row.cells[4]; // Assuming started_at is the 5th column (index 4)
+                        if (startedCell) {
+                            var newElapsedDiv = document.createElement('div');
+                            newElapsedDiv.className = 'text-muted small build-elapsed-time';
+                            newElapsedDiv.setAttribute('data-build-id', data.build_id);
+                            if (data.elapsed_time && data.elapsed_time.formatted) {
+                                newElapsedDiv.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+                            } else {
+                                newElapsedDiv.textContent = 'Elapsed: 00:00:00';
+                            }
+                            startedCell.appendChild(newElapsedDiv);
+                            console.log('Added missing elapsed time element for build ' + data.build_id);
+                            element = newElapsedDiv;
+                        } else {
+                            console.log('Started cell not found for build ' + data.build_id);
+                            return;
+                        }
+                    } else {
+                        console.log('Row not found for build ' + data.build_id);
+                        return;
+                    }
+                }
             }
 
             // Update elapsed time
             if (data.elapsed_time && data.elapsed_time.formatted) {
                 element.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+                console.log('Updated elapsed time for build ' + data.build_id + ' to:', data.elapsed_time.formatted);
             }
 
             // Update estimated remaining time if available
             var estimatedElement = document.querySelector('.build-estimated-time[data-build-id="' + data.build_id + '"]');
-            if (estimatedElement && data.estimated_remaining && data.estimated_remaining.formatted) {
-                estimatedElement.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
+            console.log('Estimated time element for build ' + data.build_id + ':', estimatedElement ? 'found' : 'not found');
+
+            // If build is successful, remove the estimated time element
+            if (estimatedElement && data.status === 'success') {
+                console.log('Build ' + data.build_id + ' is successful, removing estimated time element');
+                estimatedElement.remove();
+            } else if (estimatedElement) {
+                if (data.estimated_remaining && data.estimated_remaining.formatted) {
+                    estimatedElement.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
+                    console.log('Updated estimated time for build ' + data.build_id + ' to:', data.estimated_remaining.formatted);
+                } else {
+                    // Keep the existing text or set to calculating
+                    if (estimatedElement.textContent.indexOf('calculating') === -1) {
+                        estimatedElement.textContent = 'Est. remaining: calculating...';
+                        console.log('Set estimated time for build ' + data.build_id + ' to calculating...');
+                    }
+                }
+            } else if (row && data.status !== 'success') {
+                // If we have a row but no estimated element, create one (only if not successful)
+                console.log('Creating missing estimated time element for existing build ' + data.build_id);
+                var startedCell = row.cells[4]; // Assuming started_at is the 5th column (index 4)
+                if (startedCell) {
+                    var newEstimatedDiv = document.createElement('div');
+                    newEstimatedDiv.className = 'text-muted small build-estimated-time';
+                    newEstimatedDiv.setAttribute('data-build-id', data.build_id);
+                    if (data.estimated_remaining && data.estimated_remaining.formatted) {
+                        newEstimatedDiv.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
+                    } else {
+                        newEstimatedDiv.textContent = 'Est. remaining: calculating...';
+                    }
+                    startedCell.appendChild(newEstimatedDiv);
+                    console.log('Added missing estimated time element for build ' + data.build_id);
+                }
             }
 
             // Update progress bar if needed

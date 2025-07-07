@@ -52,6 +52,14 @@
                                 <th>Triggered By</th>
                                 <td>{{ build.triggered_by }}</td>
                             </tr>
+                            {% if build.status == 'queued' %}
+                            <tr>
+                                <th>Queue Status</th>
+                                <td>
+                                    <div id="queue-status">Position: {{ build.queue_position }}</div>
+                                </td>
+                            </tr>
+                            {% endif %}
                             {% if build.total_steps > 0 %}
                             <tr>
                                 <th>Progress</th>
@@ -198,7 +206,39 @@
                     });
                     // Add the new status class
                     statusElement.classList.add('build-status-' + data.status);
-                    statusElement.textContent = data.status.toUpperCase();
+
+                    // For queued builds, show the queue position
+                    if (data.status === 'queued' && data.queue_position) {
+                        statusElement.textContent = 'QUEUED (Position ' + data.queue_position + ')';
+
+                        // Update the dedicated queue status element if it exists
+                        var queueStatusElement = document.getElementById('queue-status');
+                        if (queueStatusElement) {
+                            queueStatusElement.textContent = 'Position: ' + data.queue_position;
+                        } else {
+                            console.log('Queue status element not found in status update, creating it');
+                            // If the element doesn't exist, we might need to add it
+                            var triggeredByRow = document.querySelector('tr:nth-child(7)'); // Assuming triggered_by is the 7th row
+                            if (triggeredByRow) {
+                                var newRow = document.createElement('tr');
+                                newRow.innerHTML = '<th>Queue Status</th><td><div id="queue-status">Position: ' + data.queue_position + '</div></td>';
+                                triggeredByRow.parentNode.insertBefore(newRow, triggeredByRow.nextSibling);
+                            }
+                        }
+                    } else {
+                        statusElement.textContent = data.status.toUpperCase();
+
+                        // If status changed from queued to something else, remove the queue status row if it exists
+                        if (data.status !== 'queued') {
+                            var queueStatusRow = document.getElementById('queue-status');
+                            if (queueStatusRow) {
+                                var row = queueStatusRow.closest('tr');
+                                if (row) {
+                                    row.remove();
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // If the build is completed, update the completed_at cell
@@ -223,41 +263,151 @@
 
             console.log('Received build progress update via WebSocket:', data);
 
-            // Validate the data before processing
+            // Check if this is a queued build
+            if (data.status === 'queued') {
+                console.log('Handling queued build update');
+                // Update queue position if available
+                if (data.queue_position) {
+                    // Update status display to show queue position
+                    var statusElement = document.querySelector('.build-status');
+                    if (statusElement) {
+                        statusElement.textContent = 'QUEUED (Position ' + data.queue_position + ')';
+                    }
+
+                    // Update the dedicated queue status element if it exists
+                    var queueStatusElement = document.getElementById('queue-status');
+                    if (queueStatusElement) {
+                        queueStatusElement.textContent = 'Position: ' + data.queue_position;
+                    } else {
+                        console.log('Queue status element not found, creating it');
+                        // If the element doesn't exist, we might need to add it
+                        var triggeredByRow = document.querySelector('tr:nth-child(7)'); // Assuming triggered_by is the 7th row
+                        if (triggeredByRow) {
+                            var newRow = document.createElement('tr');
+                            newRow.innerHTML = '<th>Queue Status</th><td><div id="queue-status">Position: ' + data.queue_position + '</div></td>';
+                            triggeredByRow.parentNode.insertBefore(newRow, triggeredByRow.nextSibling);
+                        }
+                    }
+                }
+                return; // Skip the rest of the processing for queued builds
+            }
+
+            // Validate the data before processing for running builds
             if (!data || !data.build_id || !data.current_step || !data.total_steps || data.current_step <= 0 || data.total_steps <= 0) {
                 console.log('Invalid build progress data received:', data);
                 return;
             }
 
-            // Update elapsed time
-            var elapsedElement = document.getElementById('build-elapsed-time');
-            if (elapsedElement && data.elapsed_time && data.elapsed_time.formatted) {
-                elapsedElement.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
-            }
+            // Check if the progress section exists, if not, we might need to create it for a build that just started running
+            var progressSection = null;
+            // Find the progress section by iterating through all th elements
+            document.querySelectorAll('tr th').forEach(function(th) {
+                if (th.textContent.trim() === 'Progress') {
+                    progressSection = th.closest('tr');
+                }
+            });
 
-            // Update estimated remaining time if available
-            var estimatedElement = document.getElementById('build-estimated-time');
-            if (estimatedElement && data.estimated_remaining && data.estimated_remaining.formatted) {
-                estimatedElement.textContent = 'Estimated remaining: ' + data.estimated_remaining.formatted;
-            }
+            // Find or create the time section
+            var timeSection = document.getElementById('build-elapsed-time');
+            var timeRow = null;
 
-            // Update progress bar if needed
-            if (progressBar && data.percent !== undefined && data.percent >= 0) {
-                progressBar.style.width = data.percent + '%';
-                progressBar.setAttribute('aria-valuenow', data.percent);
+            // Find the time row by iterating through all th elements
+            document.querySelectorAll('tr th').forEach(function(th) {
+                if (th.textContent.trim() === 'Time') {
+                    timeRow = th.closest('tr');
+                }
+            });
 
-                // Update the percentage text if it exists
-                var percentElement = document.querySelector('.d-flex.justify-content-between.mb-1 span:last-child');
-                if (percentElement) {
-                    percentElement.textContent = data.percent + '%';
+            // If we don't have a time section but we have progress data, create the time section
+            if (!timeSection && data.elapsed_time && data.elapsed_time.formatted) {
+                // If we don't have a time row either, create it
+                if (!timeRow) {
+                    // Find the progress row or the payload row to insert before/after
+                    var progressRow = progressSection;
+                    var payloadRow = null;
+
+                    document.querySelectorAll('tr th').forEach(function(th) {
+                        if (th.textContent.trim() === 'Payload') {
+                            payloadRow = th.closest('tr');
+                        }
+                    });
+
+                    if (progressRow) {
+                        // Create a new row after the progress row
+                        timeRow = document.createElement('tr');
+                        timeRow.innerHTML = '<th>Time</th><td><div id="build-elapsed-time">Elapsed: ' + data.elapsed_time.formatted + '</div></td>';
+                        progressRow.parentNode.insertBefore(timeRow, progressRow.nextSibling);
+                    } else if (payloadRow) {
+                        // Create a new row before the payload row
+                        timeRow = document.createElement('tr');
+                        timeRow.innerHTML = '<th>Time</th><td><div id="build-elapsed-time">Elapsed: ' + data.elapsed_time.formatted + '</div></td>';
+                        payloadRow.parentNode.insertBefore(timeRow, payloadRow);
+                    }
+
+                    // Get the newly created time section
+                    timeSection = document.getElementById('build-elapsed-time');
+                } else {
+                    // We have a time row but no time section, create it
+                    var timeCell = timeRow.querySelector('td');
+                    if (timeCell) {
+                        var timeDiv = document.createElement('div');
+                        timeDiv.id = 'build-elapsed-time';
+                        timeDiv.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+                        timeCell.appendChild(timeDiv);
+                        timeSection = timeDiv;
+                    }
                 }
             }
 
-            // Update step counter if it exists
-            var stepCounterElement = document.querySelector('.d-flex.justify-content-between.mb-1 span:first-child');
-            if (stepCounterElement && data.current_step !== undefined && data.total_steps !== undefined && 
-                data.current_step > 0 && data.total_steps > 0) {
-                stepCounterElement.textContent = 'Step ' + data.current_step + ' of ' + data.total_steps;
+            // Only try to update time elements if they exist
+            if (timeSection) {
+                // Update elapsed time
+                if (data.elapsed_time && data.elapsed_time.formatted) {
+                    timeSection.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+                }
+
+                // Update estimated remaining time if available
+                var estimatedElement = document.getElementById('build-estimated-time');
+                if (!estimatedElement && data.estimated_remaining && data.estimated_remaining.formatted) {
+                    // Create the estimated time element if it doesn't exist
+                    var timeCell = timeRow ? timeRow.querySelector('td') : null;
+                    if (timeCell) {
+                        var estimatedDiv = document.createElement('div');
+                        estimatedDiv.id = 'build-estimated-time';
+                        estimatedDiv.textContent = 'Estimated remaining: ' + data.estimated_remaining.formatted;
+                        timeCell.appendChild(estimatedDiv);
+                        estimatedElement = estimatedDiv;
+                    }
+                } else if (estimatedElement && data.estimated_remaining && data.estimated_remaining.formatted) {
+                    estimatedElement.textContent = 'Estimated remaining: ' + data.estimated_remaining.formatted;
+                }
+            } else {
+                console.error('Build elapsed time element not found:', data.build_id);
+                console.log('Time elements not found, skipping time updates');
+            }
+
+            // Only try to update progress elements if the progress section exists
+            if (progressSection) {
+                // Update progress bar if needed
+                if (progressBar && data.percent !== undefined && data.percent >= 0) {
+                    progressBar.style.width = data.percent + '%';
+                    progressBar.setAttribute('aria-valuenow', data.percent);
+
+                    // Update the percentage text if it exists
+                    var percentElement = document.querySelector('.d-flex.justify-content-between.mb-1 span:last-child');
+                    if (percentElement) {
+                        percentElement.textContent = data.percent + '%';
+                    }
+                }
+
+                // Update step counter if it exists
+                var stepCounterElement = document.querySelector('.d-flex.justify-content-between.mb-1 span:first-child');
+                if (stepCounterElement && data.current_step !== undefined && data.total_steps !== undefined && 
+                    data.current_step > 0 && data.total_steps > 0) {
+                    stepCounterElement.textContent = 'Step ' + data.current_step + ' of ' + data.total_steps;
+                }
+            } else {
+                console.log('Progress section not found, skipping progress updates');
             }
 
             // Update buildStatus variable with the latest status from the WebSocket
