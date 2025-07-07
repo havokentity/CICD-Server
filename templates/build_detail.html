@@ -79,6 +79,21 @@
                                     </div>
                                 </td>
                             </tr>
+                            {% if build.step_durations %}
+                            <tr>
+                                <th>Step Times</th>
+                                <td>
+                                    <div>
+                                        {% set durations = build.step_durations.split(',') %}
+                                        {% for duration in durations %}
+                                            {% if loop.index <= build.total_steps %}
+                                                <div>Step {{ loop.index }}: {{ duration }} seconds</div>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endif %}
                             <tr>
                                 <th>Time</th>
                                 <td>
