@@ -38,7 +38,6 @@ class Build(db.Model):
     current_step = db.Column(db.Integer, default=0)
     step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
     step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
-    step_durations = db.Column(db.Text, default='')  # CSV string storing elapsed time for each step
     queue_position = db.Column(db.Integer, default=None, nullable=True)  # Position in the build queue (null if not queued)
 
     # Foreign key to Config

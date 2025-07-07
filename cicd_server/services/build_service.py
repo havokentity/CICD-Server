@@ -403,7 +403,6 @@ def run_build(build_id, branch, project_path, build_steps):
             # Execute build steps
             success = True
             step_times = {}
-            step_durations = []
 
             for step_idx, step in enumerate(steps):
                 if not step.strip():
@@ -494,14 +493,7 @@ def run_build(build_id, branch, project_path, build_steps):
                         # Record step end time even if it failed
                         step_end_time = datetime.datetime.utcnow()
                         step_times[str(step_idx)]['end'] = step_end_time.isoformat()
-
-                        # Calculate duration in seconds and add to step_durations
-                        duration = (step_end_time - step_start_time).total_seconds()
-                        step_durations.append(str(int(duration)))
-
-                        # Update both step_times and step_durations
                         build.step_times = json.dumps(step_times)
-                        build.step_durations = ','.join(step_durations)
                         db.session.commit()
                         break
                     else:
@@ -510,14 +502,7 @@ def run_build(build_id, branch, project_path, build_steps):
                         # Record step end time
                         step_end_time = datetime.datetime.utcnow()
                         step_times[str(step_idx)]['end'] = step_end_time.isoformat()
-
-                        # Calculate duration in seconds and add to step_durations
-                        duration = (step_end_time - step_start_time).total_seconds()
-                        step_durations.append(str(int(duration)))
-
-                        # Update both step_times and step_durations
                         build.step_times = json.dumps(step_times)
-                        build.step_durations = ','.join(step_durations)
                         db.session.commit()
                 except Exception as e:
                     log_message += f"Error executing step: {str(e)}\n"
@@ -526,14 +511,7 @@ def run_build(build_id, branch, project_path, build_steps):
                     # Record step end time even if it failed
                     step_end_time = datetime.datetime.utcnow()
                     step_times[str(step_idx)]['end'] = step_end_time.isoformat()
-
-                    # Calculate duration in seconds and add to step_durations
-                    duration = (step_end_time - step_start_time).total_seconds()
-                    step_durations.append(str(int(duration)))
-
-                    # Update both step_times and step_durations
                     build.step_times = json.dumps(step_times)
-                    build.step_durations = ','.join(step_durations)
                     db.session.commit()
                     break
 

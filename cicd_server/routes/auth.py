@@ -39,17 +39,15 @@ def setup():
         user = User(username=username, is_admin=True)
         user.set_password(password)
 
-        # Create default config if it doesn't exist
-        existing_config = Config.query.filter_by(name="Default Configuration").first()
-        if not existing_config:
-            config = Config(
-                name="Default Configuration",
-                project_path="",
-                build_steps=""
-            )
-            db.session.add(config)
+        # Create default config
+        config = Config(
+            name="Default Configuration",
+            project_path="",
+            build_steps=""
+        )
 
         db.session.add(user)
+        db.session.add(config)
         db.session.commit()
 
         flash('Admin user created successfully')

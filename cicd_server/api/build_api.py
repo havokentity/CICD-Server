@@ -34,8 +34,7 @@ def api_build_progress(build_id):
         'steps_overdue': progress_data['steps_overdue'],
         'status': build.status,
         'config_id': build.config_id,
-        'config_name': build.config.name,
-        'step_durations': build.step_durations.split(',') if build.step_durations else []
+        'config_name': build.config.name
     }
 
     # Add estimated remaining time if available
@@ -68,8 +67,7 @@ def api_build_log(build_id):
         'current_step': build.current_step,
         'total_steps': build.total_steps,
         'config_id': build.config_id,
-        'config_name': build.config.name,
-        'step_durations': build.step_durations.split(',') if build.step_durations else []
+        'config_name': build.config.name
     })
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
