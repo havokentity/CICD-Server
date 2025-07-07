@@ -10,6 +10,37 @@ A lightweight Jenkins-like CICD server built with Flask and SQLite.
 - Configurable project settings (path, branch)
 - Build steps execution with console output logging
 - Web interface for all functionality
+- Real-time build progress tracking
+- Build step time estimation
+
+## Project Structure
+
+The project has been refactored into a more maintainable structure:
+
+```
+cicd_server/
+├── api/                  # API endpoints
+│   ├── build_api.py      # Build-related API endpoints
+│   ├── webhook.py        # Webhook API endpoint
+│   └── __init__.py
+├── models/               # Database models
+│   ├── models.py         # User, Build, Config models
+│   └── __init__.py
+├── routes/               # Route handlers
+│   ├── auth.py           # Authentication routes
+│   ├── build.py          # Build-related routes
+│   ├── config.py         # Configuration routes
+│   ├── dashboard.py      # Dashboard routes
+│   ├── user.py           # User management routes
+│   └── __init__.py
+├── services/             # Business logic
+│   ├── build_service.py  # Build processing logic
+│   └── __init__.py
+├── utils/                # Utility functions
+│   ├── helpers.py        # Helper functions
+│   └── __init__.py
+└── __init__.py           # Package initialization
+```
 
 ## Installation
 
@@ -32,7 +63,7 @@ pip install -r requirements.txt
 
 4. Run the application:
 ```
-python app.py
+python main.py
 ```
 
 5. Open your browser and navigate to `http://localhost:5000`
