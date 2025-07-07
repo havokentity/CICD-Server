@@ -113,7 +113,9 @@
 
 {% block extra_js %}
 <script>
+    console.log('Build detail JavaScript loaded');
     document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM content loaded in build detail');
         // Auto-scroll to the bottom of the log
         var logContainer = document.querySelector('.log-container');
         logContainer.scrollTop = logContainer.scrollHeight;
@@ -125,19 +127,63 @@
             progressBar.style.width = progress + '%';
         }
 
-        // Get build information
-        var container = document.querySelector('.container-fluid');
-        var buildStatus = container.getAttribute('data-build-status');
-        var buildId = container.getAttribute('data-build-id');
+        // Get build information - use a more specific selector to get the content container
+        var container = document.querySelector('main .container-fluid');
+        console.log('Container element (main content):', container);
+
+        // Try different ways to get the data-build-status attribute
+        var buildStatus = null;
+        if (container) {
+            buildStatus = container.getAttribute('data-build-status');
+            console.log('data-build-status attribute using getAttribute:', buildStatus);
+
+            // Try using dataset property
+            if (!buildStatus) {
+                buildStatus = container.dataset.buildStatus;
+                console.log('data-build-status attribute using dataset:', buildStatus);
+            }
+
+            // Try getting it directly from the HTML
+            if (!buildStatus) {
+                console.log('Container outerHTML:', container.outerHTML);
+                var match = container.outerHTML.match(/data-build-status="([^"]+)"/);
+                if (match) {
+                    buildStatus = match[1];
+                    console.log('data-build-status attribute extracted from HTML:', buildStatus);
+                }
+            }
+        }
+
+        var buildId = container ? container.getAttribute('data-build-id') : null;
+        console.log('data-build-id attribute:', buildId);
+
+        // If buildId is null, try to extract it from the URL
+        if (!buildId) {
+            var urlMatch = window.location.pathname.match(/\/build\/(\d+)/);
+            if (urlMatch && urlMatch[1]) {
+                buildId = urlMatch[1];
+                console.log('Extracted buildId from URL:', buildId);
+            }
+        }
 
         // Function to update build times via AJAX
         function updateBuildTimes() {
-            // Only update if the build is running
-            if (buildStatus === 'running') {
+            // Only update if the build is running and buildId is valid
+            if (buildStatus === 'running' && buildId) {
+                console.log('Updating build times...');
                 // Fetch the latest progress data for this build
+                console.log('Fetching progress data for build', buildId);
                 fetch('/api/build_progress/' + buildId + '?_=' + new Date().getTime())
-                    .then(response => response.json())
+                    .then(response => {
+                        console.log('Response status:', response.status);
+                        if (!response.ok) {
+                            throw new Error('API call failed with status ' + response.status);
+                        }
+                        return response.json();
+                    })
                     .then(data => {
+                        console.log('Received data for build', buildId, ':', data);
+                        console.log('Received progress data:', data);
                         // Update elapsed time
                         var elapsedElement = document.getElementById('build-elapsed-time');
                         if (elapsedElement) {
@@ -162,8 +208,21 @@
                             }
                         }
 
+                        // Update step counter if it exists
+                        var stepCounterElement = document.querySelector('.d-flex.justify-content-between.mb-1 span:first-child');
+                        if (stepCounterElement && data.current_step !== undefined && data.total_steps !== undefined) {
+                            stepCounterElement.textContent = 'Step ' + data.current_step + ' of ' + data.total_steps;
+                        }
+
+                        // Update buildStatus variable with the latest status from the API
+                        if (data.status) {
+                            console.log('Updating buildStatus from API:', data.status);
+                            buildStatus = data.status;
+                        }
+
                         // Check if build status has changed
                         if (data.status && data.status !== 'running') {
+                            console.log('Build status changed to:', data.status);
                             // If build is no longer running, refresh the page to show final status
                             window.location.reload();
                             return;
@@ -180,10 +239,132 @@
             }
         }
 
-        // Start updating times if the build is running
-        if (buildStatus === 'running') {
-            updateBuildTimes();
+        // Function to update build log via AJAX
+        function updateBuildLog() {
+            // Only update if the build is running and buildId is valid
+            if (buildStatus === 'running' && buildId) {
+                console.log('Updating build log...');
+                // Fetch the latest log data for this build
+                console.log('Fetching log data for build', buildId);
+                fetch('/api/build_log/' + buildId + '?_=' + new Date().getTime())
+                    .then(response => {
+                        console.log('Response status:', response.status);
+                        if (!response.ok) {
+                            throw new Error('API call failed with status ' + response.status);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Received log data for build', buildId, ':', data.status);
+                        console.log('Received log data, log length:', data.log.length);
+                        // Update log container
+                        var logContainer = document.querySelector('.log-container');
+                        if (logContainer && data.log) {
+                            logContainer.innerHTML = data.log;
+                            // Auto-scroll to the bottom of the log
+                            logContainer.scrollTop = logContainer.scrollHeight;
+                        }
+
+                        // Update buildStatus variable with the latest status from the API
+                        if (data.status) {
+                            console.log('Updating buildStatus from API in updateBuildLog:', data.status);
+                            buildStatus = data.status;
+                        }
+
+                        // Check if build status has changed
+                        if (data.status && data.status !== 'running') {
+                            console.log('Build status changed to:', data.status);
+                            // If build is no longer running, refresh the page to show final status
+                            window.location.reload();
+                            return;
+                        }
+
+                        // Schedule the next update
+                        setTimeout(updateBuildLog, 1000);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching build log:', error);
+                        // If there's an error, try again after a delay
+                        setTimeout(updateBuildLog, 5000);
+                    });
+            }
         }
+
+        console.log('Build status:', buildStatus);
+
+        // Check if we can determine the build status from the DOM
+        var statusElement = document.querySelector('.build-status');
+        if (statusElement && !buildStatus) {
+            // Check if the status element has the running class
+            if (statusElement.classList.contains('build-status-running')) {
+                console.log('Found build-status-running class, setting buildStatus to running');
+                buildStatus = 'running';
+            } else {
+                // Extract the status from the class name
+                var statusClass = Array.from(statusElement.classList).find(cls => cls.startsWith('build-status-'));
+                if (statusClass) {
+                    var extractedStatus = statusClass.replace('build-status-', '');
+                    console.log('Extracted buildStatus from DOM:', extractedStatus);
+                    buildStatus = extractedStatus;
+                }
+            }
+        }
+
+        // Initialize buildStatus if it's still null or undefined
+        if (buildStatus === null || buildStatus === undefined) {
+            console.log('buildStatus is null or undefined, setting to default value');
+            buildStatus = 'unknown';
+        }
+
+        console.log('Final buildStatus value:', buildStatus);
+
+        // Always start the updates and let the API determine if the build is running
+        console.log('Starting automatic updates for build', buildId);
+
+        // Check if buildId is valid before making API calls
+        if (!buildId) {
+            console.error('Build ID is null or undefined, cannot make API calls');
+            return; // Exit early if buildId is not valid
+        }
+
+        // Make an initial API call to get the current status
+        fetch('/api/build_progress/' + buildId + '?_=' + new Date().getTime())
+            .then(response => {
+                console.log('Initial API call response status:', response.status);
+                if (!response.ok) {
+                    throw new Error('API call failed with status ' + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Initial API call data:', data);
+
+                // Update buildStatus with the latest status from the API
+                if (data.status) {
+                    console.log('Updating buildStatus from initial API call:', data.status);
+                    buildStatus = data.status;
+                }
+
+                // Start the update functions
+                if (buildStatus === 'running') {
+                    console.log('Starting automatic updates for running build', buildId);
+                    updateBuildTimes();
+                    updateBuildLog();
+                } else {
+                    console.log('Not starting updates because buildStatus is not "running":', buildStatus);
+                }
+            })
+            .catch(error => {
+                console.error('Error in initial API call:', error);
+                // If there's an error, check if we have a valid buildStatus before starting updates
+                if (buildStatus === 'running') {
+                    console.log('Starting updates despite error because buildStatus is "running"');
+                    updateBuildTimes();
+                    updateBuildLog();
+                } else {
+                    console.log('Not starting updates due to error and buildStatus is not "running"');
+                }
+            });
     });
 </script>
 {% endblock %}

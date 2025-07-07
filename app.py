@@ -402,7 +402,27 @@ def api_build_progress(build_id):
     else:
         formatted_data['estimated_remaining'] = None
 
-    return jsonify(formatted_data)
+    response = jsonify(formatted_data)
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@app.route('/api/build_log/<int:build_id>', methods=['GET'])
+@login_required
+def api_build_log(build_id):
+    """API endpoint to get build log for AJAX updates"""
+    build = Build.query.get_or_404(build_id)
+    response = jsonify({
+        'log': build.log,
+        'status': build.status,
+        'current_step': build.current_step,
+        'total_steps': build.total_steps
+    })
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route('/api/webhook', methods=['POST'])
 def webhook():

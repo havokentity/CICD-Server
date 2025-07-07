@@ -133,7 +133,9 @@
 
 {% block extra_js %}
 <script>
+    console.log('Dashboard JavaScript loaded');
     document.addEventListener('DOMContentLoaded', function() {
+        console.log('DOM content loaded in dashboard');
         var container = document.querySelector('.container-fluid');
         var buildInProgressAttr = container.getAttribute('data-build-in-progress');
         console.log("data-build-in-progress attribute:", buildInProgressAttr);
@@ -166,9 +168,14 @@
                 var buildId = element.getAttribute('data-build-id');
 
                 // Fetch the latest progress data for this build
+                console.log('Fetching progress data for build', buildId);
                 fetch('/api/build_progress/' + buildId + '?_=' + new Date().getTime())
-                    .then(response => response.json())
+                    .then(response => {
+                        console.log('Response status:', response.status);
+                        return response.json();
+                    })
                     .then(data => {
+                        console.log('Received data for build', buildId, ':', data);
                         // Check if build status has changed from running to completed
                         if (data.status && data.status !== 'running') {
                             console.log("Build " + buildId + " status changed to " + data.status);
