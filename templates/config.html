@@ -1,0 +1,122 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Configuration - CICD Server{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Configuration</h2>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Project Settings</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        <div class="mb-3">
+                            <label for="project_path" class="form-label">Project Path</label>
+                            <input type="text" class="form-control" id="project_path" name="project_path" value="{{ config.project_path }}" required>
+                            <div class="form-text">
+                                The full path to the project directory where build steps will be executed.
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="build_steps" class="form-label">Build Steps</label>
+                            <textarea class="form-control" id="build_steps" name="build_steps" rows="10">{{ config.build_steps }}</textarea>
+                            <div class="form-text">
+                                Enter each build step on a new line. These commands will be executed in order during a build.
+                                <br>
+                                You can use variables from the webhook payload using the syntax <code>${variable}</code>.
+                                <br>
+                                For nested values, use dot notation: <code>${parent.child}</code>.
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="api_token" class="form-label">API Token</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="api_token" value="{{ config.api_token }}" readonly>
+                                <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('api_token')">
+                                    Copy
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                This token is used to authenticate webhook requests from GitHub.
+                            </div>
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="regenerate_token" name="regenerate_token">
+                            <label class="form-check-label" for="regenerate_token">Regenerate API Token</label>
+                            <div class="form-text text-warning">
+                                Warning: Regenerating the token will invalidate any existing integrations.
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Save Configuration</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Webhook Information</h5>
+                </div>
+                <div class="card-body">
+                    <p>To trigger builds from GitHub, configure a webhook with the following URL:</p>
+                    <div class="mb-3">
+                        <input type="text" class="form-control" id="webhook_url" value="{{ request.url_root }}api/webhook" readonly>
+                        <button class="btn btn-outline-secondary w-100 mt-2" type="button" onclick="copyToClipboard('webhook_url')">
+                            Copy URL
+                        </button>
+                    </div>
+
+                    <p>Add the following header to your webhook request:</p>
+                    <code>X-API-Token: {{ config.api_token }}</code>
+
+                    <p class="mt-3">Example payload:</p>
+                    <pre class="bg-light p-2 rounded"><code>{
+  "branch": "main",
+  "commit": "abc123",
+  "author": "username",
+  "message": "Commit message",
+  "repository": {
+    "name": "repo-name",
+    "owner": "owner-name"
+  }
+}</code></pre>
+
+                    <p class="mt-3">Example build step using variables:</p>
+                    <pre class="bg-light p-2 rounded"><code>echo "Building branch ${branch} commit ${commit} by ${author}"
+echo "Repository: ${repository.name} owned by ${repository.owner}"</code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function copyToClipboard(elementId) {
+        var element = document.getElementById(elementId);
+        element.select();
+        element.setSelectionRange(0, 99999);
+        document.execCommand("copy");
+
+        // Show a temporary "Copied!" tooltip
+        var button = event.target;
+        var originalText = button.innerText;
+        button.innerText = "Copied!";
+        setTimeout(function() {
+            button.innerText = originalText;
+        }, 1500);
+    }
+</script>
+{% endblock %}

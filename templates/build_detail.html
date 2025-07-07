@@ -1,0 +1,100 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Build #{{ build.id }} - CICD Server{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4" data-build-status="{{ build.status }}">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Build #{{ build.id }}</h2>
+        <div>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Build Information</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table">
+                        <tbody>
+                            <tr>
+                                <th style="width: 150px;">Status</th>
+                                <td>
+                                    <span class="build-status build-status-{{ build.status }}">
+                                        {{ build.status.upper() }}
+                                    </span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <th>Branch</th>
+                                <td>{{ build.branch }}</td>
+                            </tr>
+                            <tr>
+                                <th>Project Path</th>
+                                <td>{{ build.project_path }}</td>
+                            </tr>
+                            <tr>
+                                <th>Started</th>
+                                <td>{{ build.started_at.strftime('%Y-%m-%d %H:%M:%S') if build.started_at else 'N/A' }}</td>
+                            </tr>
+                            <tr>
+                                <th>Completed</th>
+                                <td>{{ build.completed_at.strftime('%Y-%m-%d %H:%M:%S') if build.completed_at else 'N/A' }}</td>
+                            </tr>
+                            <tr>
+                                <th>Triggered By</th>
+                                <td>{{ build.triggered_by }}</td>
+                            </tr>
+                            <tr>
+                                <th>Payload</th>
+                                <td>
+                                    <pre class="bg-light p-2 rounded"><code>{{ build.payload }}</code></pre>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">Build Log</h5>
+                    {% if build.status == 'running' %}
+                    <span class="badge bg-primary">Auto-refreshing</span>
+                    {% endif %}
+                </div>
+                <div class="card-body p-0">
+                    <div class="log-container p-3">{{ build.log|safe }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Auto-scroll to the bottom of the log
+        var logContainer = document.querySelector('.log-container');
+        logContainer.scrollTop = logContainer.scrollHeight;
+
+        // Auto-refresh the page every 5 seconds if the build is still running
+        var container = document.querySelector('.container-fluid');
+        var buildStatus = container.getAttribute('data-build-status');
+
+        if (buildStatus === 'running') {
+            setTimeout(function() {
+                window.location.reload();
+            }, 5000);
+        }
+    });
+</script>
+{% endblock %}

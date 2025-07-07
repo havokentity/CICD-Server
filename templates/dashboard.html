@@ -1,0 +1,123 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Dashboard - CICD Server{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4" data-build-in-progress="{{ build_in_progress|lower }}">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Dashboard</h2>
+        <div>
+            {% if not build_in_progress %}
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#triggerBuildModal">
+                Trigger Build
+            </button>
+            {% else %}
+            <button type="button" class="btn btn-secondary" disabled>
+                Build in Progress
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Builds</h5>
+                </div>
+                <div class="card-body">
+                    {% if builds %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Status</th>
+                                    <th>Branch</th>
+                                    <th>Started</th>
+                                    <th>Completed</th>
+                                    <th>Triggered By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for build in builds %}
+                                <tr>
+                                    <td>{{ build.id }}</td>
+                                    <td>
+                                        <span class="build-status build-status-{{ build.status }}">
+                                            {{ build.status.upper() }}
+                                        </span>
+                                    </td>
+                                    <td>{{ build.branch }}</td>
+                                    <td>{{ build.started_at.strftime('%Y-%m-%d %H:%M:%S') if build.started_at else 'N/A' }}</td>
+                                    <td>{{ build.completed_at.strftime('%Y-%m-%d %H:%M:%S') if build.completed_at else 'N/A' }}</td>
+                                    <td>{{ build.triggered_by }}</td>
+                                    <td>
+                                        <a href="{{ url_for('build_detail', build_id=build.id) }}" class="btn btn-sm btn-info">
+                                            View Details
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        No builds yet. Trigger a build to get started.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Trigger Build Modal -->
+<div class="modal fade" id="triggerBuildModal" tabindex="-1" aria-labelledby="triggerBuildModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="triggerBuildModalLabel">Trigger New Build</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('trigger_build') }}" method="post">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="branch" class="form-label">Branch</label>
+                        <input type="text" class="form-control" id="branch" name="branch" value="main" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Project Path</label>
+                        <input type="text" class="form-control" value="{{ config.project_path }}" readonly>
+                        <div class="form-text">
+                            Configure the project path in the <a href="{{ url_for('config') }}">Configuration</a> page.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Trigger Build</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Auto-refresh the page every 10 seconds if a build is in progress
+    document.addEventListener('DOMContentLoaded', function() {
+        var container = document.querySelector('.container-fluid');
+        var buildInProgress = container.getAttribute('data-build-in-progress') === 'true';
+        
+        if (buildInProgress) {
+            setTimeout(function() {
+                window.location.reload();
+            }, 10000);
+        }
+    });
+</script>
+{% endblock %}

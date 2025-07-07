@@ -1,0 +1,154 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CICD Server{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 60px;
+            padding-bottom: 40px;
+        }
+        .sidebar {
+            position: fixed;
+            top: 60px;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+            padding: 20px 0;
+            overflow-x: hidden;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+        }
+        .sidebar .nav-link {
+            font-weight: 500;
+            color: #333;
+        }
+        .sidebar .nav-link.active {
+            color: #007bff;
+        }
+        .main-content {
+            margin-left: 240px;
+            padding: 20px;
+        }
+        .navbar-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .build-status {
+            font-weight: bold;
+        }
+        .build-status-pending {
+            color: #6c757d;
+        }
+        .build-status-running {
+            color: #007bff;
+        }
+        .build-status-success {
+            color: #28a745;
+        }
+        .build-status-failed {
+            color: #dc3545;
+        }
+        .log-container {
+            background-color: #212529;
+            color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        @media (max-width: 768px) {
+            .main-content {
+                margin-left: 0;
+            }
+            .sidebar {
+                position: static;
+                height: auto;
+                border-right: none;
+                border-bottom: 1px solid #dee2e6;
+            }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('index') }}">CICD Server</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarCollapse">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarCollapse">
+                <ul class="navbar-nav ms-auto">
+                    {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                        <span class="nav-link">Welcome, {{ current_user.username }}</span>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+                    </li>
+                    {% else %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            {% if current_user.is_authenticated %}
+            <div class="col-md-3 col-lg-2 d-md-block sidebar collapse">
+                <div class="position-sticky pt-3">
+                    <ul class="nav flex-column">
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+                                Dashboard
+                            </a>
+                        </li>
+                        {% if current_user.is_admin %}
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'users' %}active{% endif %}" href="{{ url_for('users') }}">
+                                Users
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.endpoint == 'config' %}active{% endif %}" href="{{ url_for('config') }}">
+                                Configuration
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+
+            <main class="{% if current_user.is_authenticated %}col-md-9 ms-sm-auto col-lg-10 px-md-4 main-content{% else %}col-12{% endif %}">
+                {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                <div class="alert alert-info mt-3">
+                    <ul class="mb-0">
+                        {% for message in messages %}
+                        <li>{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                {% endwith %}
+
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
