@@ -29,22 +29,48 @@ def build_detail(build_id):
 def trigger_build():
     global build_in_progress
 
+    config_id = request.form.get('config_id')
+    if not config_id:
+        flash('Configuration is required')
+        return redirect(url_for('dashboard'))
+
+    config = Config.query.get_or_404(config_id)
+    branch = request.form.get('branch', 'main')
+
+    # Create a simple payload with the branch
+    import json
+    payload = {'branch': branch}
+
     with build_lock:
+        # Check if a build is already in progress
         if build_in_progress:
-            flash('A build is already in progress')
+            # Check if the queue is full for this specific configuration
+            queued_builds_count = Build.query.filter_by(status='queued', config_id=config.id).count()
+            if queued_builds_count >= config.max_queue_length:
+                flash(f'Build queue for "{config.name}" is full (max {config.max_queue_length}). Try again later.', 'error')
+                return redirect(url_for('dashboard'))
+
+            # Find the highest queue position
+            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(Build.queue_position.isnot(None)).scalar() or 0
+
+            # Add the build to the queue
+            build = Build(
+                status='queued',
+                branch=branch,
+                project_path=config.project_path,
+                triggered_by=current_user.username,
+                payload=json.dumps(payload),
+                config_id=config.id,
+                queue_position=highest_position + 1
+            )
+
+            db.session.add(build)
+            db.session.commit()
+
+            flash(f'Build queued (position {build.queue_position}) using configuration "{config.name}"')
             return redirect(url_for('dashboard'))
 
-        config_id = request.form.get('config_id')
-        if not config_id:
-            flash('Configuration is required')
-            return redirect(url_for('dashboard'))
-
-        config = Config.query.get_or_404(config_id)
-        branch = request.form.get('branch', 'main')
-
-        # Create a simple payload with the branch
-        payload = {'branch': branch}
-
+        # No build is in progress, start this one
         build = Build(
             status='pending',
             branch=branch,

@@ -23,6 +23,9 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_key_' + str(uuid.uu
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///cicd.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Add built-in functions to Jinja2 environment
+app.jinja_env.globals.update(max=max, min=min)
+
 # Initialize database
 db = SQLAlchemy(app)
 

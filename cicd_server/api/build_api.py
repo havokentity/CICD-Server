@@ -73,3 +73,23 @@ def api_build_log(build_id):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+@app.route('/api/latest_build', methods=['GET'])
+@login_required
+def api_latest_build():
+    """API endpoint to get the latest build ID for checking new builds"""
+    latest_build = Build.query.order_by(Build.id.desc()).first()
+    if latest_build:
+        response = jsonify({
+            'latest_build_id': latest_build.id,
+            'status': latest_build.status,
+            'triggered_by': latest_build.triggered_by
+        })
+    else:
+        response = jsonify({
+            'latest_build_id': None
+        })
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response

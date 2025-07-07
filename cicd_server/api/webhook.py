@@ -40,12 +40,46 @@ def webhook():
             return jsonify({'status': 'error', 'message': f'Configuration "{config_name}" not found'}), 404
 
     with build_lock:
+        # Check if a build is already in progress
         if build_in_progress:
-            return jsonify({'status': 'error', 'message': 'Build already in progress'}), 409
+            # Check if the queue is full for this specific configuration
+            queued_builds_count = Build.query.filter_by(status='queued', config_id=config.id).count()
+            if queued_builds_count >= config.max_queue_length:
+                return jsonify({
+                    'status': 'error', 
+                    'message': f'Build queue for "{config.name}" is full (max {config.max_queue_length}). Try again later.'
+                }), 429  # 429 Too Many Requests
 
+            # Find the highest queue position
+            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(Build.queue_position.isnot(None)).scalar() or 0
+
+            # Add the build to the queue
+            branch = data.get('branch', 'main')
+            payload_json = json.dumps(data)
+
+            build = Build(
+                status='queued',
+                branch=branch,
+                project_path=config.project_path,
+                triggered_by='webhook',
+                payload=payload_json,
+                config_id=config.id,
+                queue_position=highest_position + 1
+            )
+
+            db.session.add(build)
+            db.session.commit()
+
+            return jsonify({
+                'status': 'queued', 
+                'message': f'Build queued (position {build.queue_position}) using configuration "{config.name}"', 
+                'build_id': build.id,
+                'config': config.name,
+                'queue_position': build.queue_position
+            })
+
+        # No build is in progress, start this one
         branch = data.get('branch', 'main')
-
-        # Store the payload as a JSON string
         payload_json = json.dumps(data)
 
         build = Build(

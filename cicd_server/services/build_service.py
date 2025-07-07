@@ -122,6 +122,34 @@ def calculate_build_progress(build):
 
     return progress_data
 
+def start_next_queued_build():
+    """Start the next build in the queue if any."""
+    global build_in_progress
+
+    with app.app_context():
+        # Find the next queued build with the lowest queue position
+        next_build = Build.query.filter_by(status='queued').order_by(Build.queue_position).first()
+
+        if next_build:
+            # Update the build status and clear the queue position
+            next_build.status = 'pending'
+            next_build.started_at = datetime.datetime.utcnow()
+            next_build.queue_position = None
+            db.session.commit()
+
+            # Get the configuration for this build
+            from cicd_server.models import Config
+            config = Config.query.get(next_build.config_id)
+
+            # Start the build in a separate thread
+            import threading
+            threading.Thread(target=run_build, args=(next_build.id, next_build.branch, next_build.project_path, config.build_steps)).start()
+
+            logger.info(f"Started next queued build #{next_build.id}")
+            return True
+
+        return False
+
 def run_build(build_id, branch, project_path, build_steps):
     """Run a build with the specified parameters."""
     global build_in_progress
@@ -274,17 +302,34 @@ def run_build(build_id, branch, project_path, build_steps):
             with build_lock:
                 build_in_progress = False
 
+            # Start the next queued build if any
+            start_next_queued_build()
+
 def mark_abandoned_builds():
     """
     Mark any builds that are still in 'pending' or 'running' state as 'failed-permanently'.
+    Reset queued builds to be started again.
     This is called at server startup to handle builds that were interrupted by a server shutdown.
     """
     with app.app_context():
+        # Mark pending and running builds as failed-permanently
         abandoned_builds = Build.query.filter(Build.status.in_(['pending', 'running'])).all()
         for build in abandoned_builds:
             build.status = 'failed-permanently'
             build.completed_at = datetime.datetime.utcnow()
             build.log += f"\nBuild marked as FAILED PERMANENTLY due to server restart at {build.completed_at}\n"
-        if abandoned_builds:
+
+        # Reset queue positions for queued builds
+        # This ensures they maintain their relative order in the queue
+        queued_builds = Build.query.filter_by(status='queued').order_by(Build.queue_position).all()
+        for i, build in enumerate(queued_builds):
+            build.queue_position = i + 1
+
+        if abandoned_builds or queued_builds:
             db.session.commit()
             logger.info(f"Marked {len(abandoned_builds)} abandoned builds as failed-permanently")
+            logger.info(f"Reset queue positions for {len(queued_builds)} queued builds")
+
+        # Start the first queued build if any
+        if queued_builds:
+            start_next_queued_build()

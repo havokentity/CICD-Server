@@ -26,7 +26,7 @@ class User(UserMixin, db.Model):
 
 class Build(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    status = db.Column(db.String(20), default='pending')  # pending, running, success, failed
+    status = db.Column(db.String(20), default='pending')  # pending, running, success, failed, queued
     branch = db.Column(db.String(100))
     project_path = db.Column(db.String(500))
     started_at = db.Column(db.DateTime)
@@ -38,6 +38,7 @@ class Build(db.Model):
     current_step = db.Column(db.Integer, default=0)
     step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
     step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
+    queue_position = db.Column(db.Integer, default=None, nullable=True)  # Position in the build queue (null if not queued)
 
     # Foreign key to Config
     config_id = db.Column(db.Integer, db.ForeignKey('config.id'), nullable=False)
@@ -48,6 +49,7 @@ class Config(db.Model):
     api_token = db.Column(db.String(100), default=str(uuid.uuid4()))
     project_path = db.Column(db.String(500), default='')
     build_steps = db.Column(db.Text, default='')
+    max_queue_length = db.Column(db.Integer, default=5)  # Maximum number of builds that can be queued
 
     # Relationship with builds
     builds = db.relationship('Build', backref='config', lazy=True)

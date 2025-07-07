@@ -32,6 +32,15 @@ def add_config():
         name = request.form.get('name', '')
         project_path = request.form.get('project_path', '')
         build_steps = request.form.get('build_steps', '')
+        max_queue_length = request.form.get('max_queue_length', '5')
+
+        # Validate max_queue_length
+        try:
+            max_queue_length = int(max_queue_length)
+            if max_queue_length < 1:
+                max_queue_length = 5  # Default to 5 if invalid
+        except ValueError:
+            max_queue_length = 5  # Default to 5 if invalid
 
         # Check if a configuration with this name already exists
         existing_config = Config.query.filter_by(name=name).first()
@@ -44,6 +53,7 @@ def add_config():
             name=name,
             project_path=project_path,
             build_steps=build_steps,
+            max_queue_length=max_queue_length,
             api_token=str(uuid.uuid4())
         )
 
@@ -68,6 +78,15 @@ def edit_config(config_id):
         name = request.form.get('name', '')
         project_path = request.form.get('project_path', '')
         build_steps = request.form.get('build_steps', '')
+        max_queue_length = request.form.get('max_queue_length', '5')
+
+        # Validate max_queue_length
+        try:
+            max_queue_length = int(max_queue_length)
+            if max_queue_length < 1:
+                max_queue_length = 5  # Default to 5 if invalid
+        except ValueError:
+            max_queue_length = 5  # Default to 5 if invalid
 
         # Check if a configuration with this name already exists (excluding the current one)
         existing_config = Config.query.filter(Config.name == name, Config.id != config_id).first()
@@ -78,6 +97,7 @@ def edit_config(config_id):
         config.name = name
         config.project_path = project_path
         config.build_steps = build_steps
+        config.max_queue_length = max_queue_length
 
         if 'regenerate_token' in request.form:
             config.api_token = str(uuid.uuid4())
