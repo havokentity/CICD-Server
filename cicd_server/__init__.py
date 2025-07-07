@@ -8,6 +8,7 @@ continuous integration and continuous deployment server.
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from flask_socketio import SocketIO
 import os
 import uuid
 import logging
@@ -33,6 +34,9 @@ db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# Initialize SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global variable to track if a build is in progress
 build_in_progress = False

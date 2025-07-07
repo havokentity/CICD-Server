@@ -5,7 +5,7 @@ This is a simple wrapper for the CICD Server application.
 The actual application code is in the cicd_server package.
 """
 
-from cicd_server import app, db
+from cicd_server import app, db, socketio
 from cicd_server.services.build_service import mark_abandoned_builds
 from cicd_server.utils.migration import migrate_to_multiple_configs
 
@@ -23,4 +23,4 @@ if __name__ == '__main__':
     # Mark any pending or running builds as failed-permanently
     mark_abandoned_builds()
 
-    app.run(debug=True)
+    socketio.run(app, debug=True)

@@ -46,7 +46,7 @@
                             </thead>
                             <tbody>
                                 {% for build in builds %}
-                                <tr>
+                                <tr data-build-id="{{ build.id }}">
                                     <td>{{ build.id }}</td>
                                     <td>
                                         <span class="build-status build-status-{{ build.status }}">
@@ -216,144 +216,142 @@
             bar.style.width = progress + '%';
         });
 
-        // Store the latest build ID we've seen
-        var latestBuildId = null;
+        // Find the highest build ID currently in the table
+        var latestBuildId = 0;
+        var buildRows = document.querySelectorAll('tr[data-build-id]');
+        buildRows.forEach(function(row) {
+            var buildId = parseInt(row.getAttribute('data-build-id'));
+            if (buildId > latestBuildId) {
+                latestBuildId = buildId;
+            }
+        });
+        console.log('Initial latest build ID from DOM:', latestBuildId);
 
-        // Function to check for new builds
-        function checkForNewBuilds() {
-            console.log('Checking for new builds...');
-            fetch('/api/latest_build?_=' + new Date().getTime())
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Latest build data:', data);
+        // Connect to WebSocket server
+        const socket = io();
 
-                    // If this is our first check, just store the latest build ID
-                    if (latestBuildId === null) {
-                        latestBuildId = data.latest_build_id;
-                        console.log('Initial latest build ID:', latestBuildId);
-                    } 
-                    // If we have a new build and it was triggered by a webhook, refresh the page
-                    else if (data.latest_build_id > latestBuildId && data.triggered_by === 'webhook') {
-                        console.log('New build detected! Refreshing page...');
-                        window.location.reload();
-                    }
+        // Listen for build status updates
+        socket.on('build_status_update', function(data) {
+            console.log('Received build status update:', data);
 
-                    // Schedule the next check
-                    setTimeout(checkForNewBuilds, 5000); // Check every 5 seconds
-                })
-                .catch(error => {
-                    console.error('Error checking for new builds:', error);
-                    // Even if there's an error, keep checking
-                    setTimeout(checkForNewBuilds, 5000);
-                });
-        }
-
-        // Function to update build times via AJAX
-        function updateBuildTimes() {
-            // Find all running builds that need time updates
-            var elapsedTimeElements = document.querySelectorAll('.build-elapsed-time');
-
-            elapsedTimeElements.forEach(function(element) {
-                var buildId = element.getAttribute('data-build-id');
-
-                // Fetch the latest progress data for this build
-                console.log('Fetching progress data for build', buildId);
-                fetch('/api/build_progress/' + buildId + '?_=' + new Date().getTime())
-                    .then(response => {
-                        console.log('Response status:', response.status);
-                        return response.json();
-                    })
-                    .then(data => {
-                        console.log('Received data for build', buildId, ':', data);
-                        // Check if build status has changed from running to completed
-                        if (data.status && data.status !== 'running') {
-                            console.log("Build " + buildId + " status changed to " + data.status);
-
-                            // Update the status display
-                            var row = element.closest('tr');
-                            if (row) {
-                                var statusElement = row.querySelector('.build-status');
-                                if (statusElement) {
-                                    // Remove the running class and add the appropriate class
-                                    statusElement.classList.remove('build-status-running');
-                                    statusElement.classList.add('build-status-' + data.status);
-                                    statusElement.textContent = data.status.toUpperCase();
-                                }
-
-                                // Remove progress bar and timer elements
-                                var progressContainer = row.querySelector('.mt-1');
-                                if (progressContainer) {
-                                    progressContainer.remove();
-                                }
-
-                                // Remove the elapsed time and estimated time elements
-                                element.remove();
-                                var estimatedElement = row.querySelector('.build-estimated-time');
-                                if (estimatedElement) {
-                                    estimatedElement.remove();
-                                }
-
-                                // Update the completed_at cell if it's empty
-                                var completedCell = row.cells[4]; // Assuming completed_at is the 5th column (index 4)
-                                if (completedCell && completedCell.textContent.trim() === 'N/A') {
-                                    var now = new Date();
-                                    completedCell.textContent = now.toISOString().replace('T', ' ').substring(0, 19);
-                                }
-                            }
-                            return; // Don't continue updating this build
-                        }
-
-                        // If build is still running, update as normal
-                        // Update elapsed time
-                        element.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
-
-                        // Update estimated remaining time if available
-                        var estimatedElement = document.querySelector('.build-estimated-time[data-build-id="' + buildId + '"]');
-                        if (estimatedElement && data.estimated_remaining) {
-                            estimatedElement.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
-                        }
-
-                        // Update progress bar if needed
-                        var row = element.closest('tr');
-                        if (row && data.percent !== undefined) {
-                            var progressBar = row.querySelector('.progress-bar');
-                            if (progressBar) {
-                                progressBar.style.width = data.percent + '%';
-                                progressBar.setAttribute('aria-valuenow', data.percent);
-                                progressBar.setAttribute('data-progress', data.percent);
-
-                                // Update the percentage text if it exists
-                                var percentElement = row.querySelector('small.text-muted');
-                                if (percentElement) {
-                                    percentElement.textContent = data.percent + '% (Step ' + data.current_step + '/' + data.total_steps + ')';
-                                }
-                            }
-                        }
-                    })
-                    .catch(error => console.error('Error fetching build progress:', error));
-            });
-
-            // If builds are in progress, schedule the next update
-            console.log("Checking if updates should continue: buildInProgress=", buildInProgress, "elapsedTimeElements.length=", elapsedTimeElements.length);
-            if (buildInProgress && elapsedTimeElements.length > 0) {
-                console.log("Builds are in progress, updating times...");
-                setTimeout(updateBuildTimes, 1000); // Update every second
-            } else if (buildInProgress) {
-                console.log("Build in progress but no elapsed time elements found, refreshing page immediately");
-                // If no elements to update but build is in progress, refresh the page immediately
+            // If we have a new build and it was triggered by a webhook, refresh the page
+            if (data.build_id > latestBuildId && data.triggered_by === 'webhook') {
+                console.log('New build detected via WebSocket! Refreshing page...');
                 window.location.reload();
-            } else {
-                console.log("No builds in progress or no elapsed time elements, stopping updates");
+            }
+            // If the status of an existing build in the table has changed, update it
+            else {
+                updateBuildInTable(data);
+                // Update latestBuildId if this build ID is higher
+                if (data.build_id > latestBuildId) {
+                    latestBuildId = data.build_id;
+                    console.log('Updated latest build ID:', latestBuildId);
+                }
+            }
+        });
+
+        // Function to update a specific build in the table
+        function updateBuildInTable(data) {
+            // Find the row for this build
+            const row = document.querySelector(`tr[data-build-id="${data.build_id}"]`);
+            if (!row) {
+                console.log('Build not found in table:', data.build_id);
+                return;
+            }
+
+            console.log('Updating build in table:', data.build_id);
+
+            // Update status
+            const statusCell = row.querySelector('.build-status');
+            if (statusCell) {
+                // Remove all status classes
+                statusCell.classList.forEach(cls => {
+                    if (cls.startsWith('build-status-')) {
+                        statusCell.classList.remove(cls);
+                    }
+                });
+                // Add the new status class
+                statusCell.classList.add('build-status-' + data.status);
+                statusCell.textContent = data.status.toUpperCase();
+            }
+
+            // If the build is completed, update the completed_at cell
+            if (data.status !== 'running' && data.status !== 'queued' && data.completed_at) {
+                const completedCell = row.cells[5]; // Assuming completed_at is the 6th column (index 5)
+                if (completedCell && completedCell.textContent.trim() === 'N/A') {
+                    completedCell.textContent = new Date(data.completed_at).toLocaleString();
+                }
             }
         }
 
-        // Start updating times if there's a build in progress
-        if (buildInProgress) {
-            updateBuildTimes();
-        }
+        // Listen for build progress updates via WebSocket
+        socket.on('build_progress_update', function(data) {
+            console.log('Received build progress update via WebSocket:', data);
 
-        // Start checking for new builds regardless of whether there's a build in progress
-        checkForNewBuilds();
+            // Find the element for this build
+            var element = document.querySelector('.build-elapsed-time[data-build-id="' + data.build_id + '"]');
+            if (!element) {
+                console.log('Build elapsed time element not found:', data.build_id);
+                return;
+            }
+
+            // Update elapsed time
+            element.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+
+            // Update estimated remaining time if available
+            var estimatedElement = document.querySelector('.build-estimated-time[data-build-id="' + data.build_id + '"]');
+            if (estimatedElement && data.estimated_remaining) {
+                estimatedElement.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
+            }
+
+            // Update progress bar if needed
+            var row = element.closest('tr');
+            if (row && data.percent !== undefined) {
+                var progressBar = row.querySelector('.progress-bar');
+                if (progressBar) {
+                    // Update progress bar width
+                    progressBar.style.width = data.percent + '%';
+                    progressBar.setAttribute('aria-valuenow', data.percent);
+                    progressBar.setAttribute('data-progress', data.percent);
+
+                    // Update the percentage text if it exists
+                    var percentElement = row.querySelector('small.text-muted');
+                    if (percentElement) {
+                        percentElement.textContent = data.percent + '% (Step ' + data.current_step + '/' + data.total_steps + ')';
+                    }
+
+                    // Update the progress bar class based on overdue status
+                    if (data.steps_overdue) {
+                        progressBar.classList.add('bg-warning');
+                    } else {
+                        progressBar.classList.remove('bg-warning');
+                    }
+                }
+            }
+
+            // Force recalculation of elapsed time percentage
+            if (data.elapsed_time && data.elapsed_time.seconds) {
+                // Find all running builds in the table
+                var runningBuilds = document.querySelectorAll('.build-status-running');
+                runningBuilds.forEach(function(buildStatus) {
+                    var buildRow = buildStatus.closest('tr');
+                    if (buildRow) {
+                        var buildId = buildRow.getAttribute('data-build-id');
+                        if (buildId == data.build_id) {
+                            // Update progress bar with elapsed time percentage
+                            var progressBar = buildRow.querySelector('.progress-bar');
+                            if (progressBar) {
+                                // Ensure progress bar is updated with the latest percentage
+                                progressBar.style.width = data.percent + '%';
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        // No need to start polling functions as we're using WebSockets now
+        console.log('Using WebSockets for real-time updates');
     });
 </script>
 {% endblock %}

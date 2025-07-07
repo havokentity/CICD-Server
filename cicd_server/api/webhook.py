@@ -9,7 +9,7 @@ import json
 import datetime
 import threading
 
-from cicd_server import app, db, build_in_progress, build_lock
+from cicd_server import app, db, build_in_progress, build_lock, socketio
 from cicd_server.models import Build, Config
 from cicd_server.services.build_service import run_build
 
@@ -70,6 +70,17 @@ def webhook():
             db.session.add(build)
             db.session.commit()
 
+            # Emit WebSocket event for build status update
+            socketio.emit('build_status_update', {
+                'build_id': build.id,
+                'status': build.status,
+                'config_id': config.id,
+                'config_name': config.name,
+                'triggered_by': build.triggered_by,
+                'branch': build.branch,
+                'queue_position': build.queue_position
+            })
+
             return jsonify({
                 'status': 'queued', 
                 'message': f'Build queued (position {build.queue_position}) using configuration "{config.name}"', 
@@ -94,6 +105,16 @@ def webhook():
 
         db.session.add(build)
         db.session.commit()
+
+        # Emit WebSocket event for build status update
+        socketio.emit('build_status_update', {
+            'build_id': build.id,
+            'status': build.status,
+            'config_id': config.id,
+            'config_name': config.name,
+            'triggered_by': build.triggered_by,
+            'branch': build.branch
+        })
 
         # Start build in a separate thread
         threading.Thread(target=run_build, args=(build.id, branch, config.project_path, config.build_steps)).start()

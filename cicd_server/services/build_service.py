@@ -10,7 +10,7 @@ import subprocess
 import re
 import logging
 
-from cicd_server import app, db, build_in_progress, build_lock, logger
+from cicd_server import app, db, build_in_progress, build_lock, logger, socketio
 from cicd_server.models import Build
 from cicd_server.utils.helpers import get_nested_value
 
@@ -166,6 +166,16 @@ def run_build(build_id, branch, project_path, build_steps):
             # Parse the payload JSON
             payload = json.loads(build.payload) if build.payload else {}
 
+            # Emit WebSocket event for build status change
+            socketio.emit('build_status_update', {
+                'build_id': build.id,
+                'status': build.status,
+                'config_id': build.config_id,
+                'config_name': build.config.name,
+                'triggered_by': build.triggered_by,
+                'branch': build.branch
+            })
+
             # Log the build start
             log_message = f"Build #{build_id} started at {build.started_at}\n"
             log_message += f"Branch: {branch}\n"
@@ -221,6 +231,33 @@ def run_build(build_id, branch, project_path, build_steps):
                 build.step_times = json.dumps(step_times)
                 db.session.commit()
 
+                # Emit WebSocket event for build progress update
+                progress_data = calculate_build_progress(build)
+                socketio.emit('build_progress_update', {
+                    'build_id': build.id,
+                    'status': build.status,
+                    'current_step': build.current_step,
+                    'total_steps': build.total_steps,
+                    'percent': progress_data['percent'],
+                    'elapsed_time': {
+                        'seconds': progress_data['elapsed_time'],
+                        'formatted': '{:d}:{:02d}:{:02d}'.format(
+                            int(progress_data['elapsed_time']//3600), 
+                            int((progress_data['elapsed_time']//60)%60), 
+                            int(progress_data['elapsed_time']%60)
+                        )
+                    },
+                    'estimated_remaining': {
+                        'seconds': progress_data['estimated_remaining'],
+                        'formatted': '{:d}:{:02d}:{:02d}'.format(
+                            int(progress_data['estimated_remaining']//3600) if progress_data['estimated_remaining'] else 0, 
+                            int((progress_data['estimated_remaining']//60)%60) if progress_data['estimated_remaining'] else 0, 
+                            int(progress_data['estimated_remaining']%60) if progress_data['estimated_remaining'] else 0
+                        )
+                    } if progress_data['estimated_remaining'] is not None else None,
+                    'steps_overdue': progress_data['steps_overdue']
+                })
+
                 # Replace variables in the step with values from the payload
                 processed_step = step
 
@@ -254,6 +291,13 @@ def run_build(build_id, branch, project_path, build_steps):
                             log_message += output
                             build.log = log_message
                             db.session.commit()
+
+                            # Emit WebSocket event for log update
+                            socketio.emit('build_log_update', {
+                                'build_id': build.id,
+                                'log': build.log,
+                                'status': build.status
+                            })
 
                     return_code = process.poll()
                     if return_code != 0:
@@ -292,12 +336,48 @@ def run_build(build_id, branch, project_path, build_steps):
             build.log = log_message
             db.session.commit()
 
+            # Emit WebSocket event for build completion
+            socketio.emit('build_status_update', {
+                'build_id': build.id,
+                'status': build.status,
+                'config_id': build.config_id,
+                'config_name': build.config.name,
+                'triggered_by': build.triggered_by,
+                'branch': build.branch,
+                'completed_at': build.completed_at.isoformat() if build.completed_at else None
+            })
+
+            # Also emit a final log update
+            socketio.emit('build_log_update', {
+                'build_id': build.id,
+                'log': build.log,
+                'status': build.status
+            })
+
         except Exception as e:
             logger.exception("Error in build process")
             build.status = 'failed'
             build.completed_at = datetime.datetime.utcnow()
             build.log += f"\nError in build process: {str(e)}\n"
             db.session.commit()
+
+            # Emit WebSocket event for build failure
+            socketio.emit('build_status_update', {
+                'build_id': build.id,
+                'status': build.status,
+                'config_id': build.config_id,
+                'config_name': build.config.name,
+                'triggered_by': build.triggered_by,
+                'branch': build.branch,
+                'completed_at': build.completed_at.isoformat() if build.completed_at else None
+            })
+
+            # Also emit a final log update
+            socketio.emit('build_log_update', {
+                'build_id': build.id,
+                'log': build.log,
+                'status': build.status
+            })
         finally:
             with build_lock:
                 build_in_progress = False
