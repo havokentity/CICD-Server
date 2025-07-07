@@ -144,11 +144,20 @@ def dashboard():
 
     # Calculate progress for each build
     builds_progress = {}
+    running_builds_count = 0
     for build in builds:
         builds_progress[build.id] = calculate_build_progress(build)
+        if build.status == 'running':
+            running_builds_count += 1
+
+    # Set build_in_progress based on whether there are any running builds
+    local_build_in_progress = running_builds_count > 0 or build_in_progress
+
+    # Debug logging
+    print(f"Dashboard: running_builds_count={running_builds_count}, global build_in_progress={build_in_progress}, local_build_in_progress={local_build_in_progress}")
 
     return render_template('dashboard.html', builds=builds, config=config, 
-                          build_in_progress=build_in_progress, builds_progress=builds_progress)
+                          build_in_progress=local_build_in_progress, builds_progress=builds_progress)
 
 @app.route('/users')
 @login_required
@@ -267,8 +276,13 @@ def calculate_build_progress(build):
         progress_data['percent'] = min(100, int((build.current_step / build.total_steps) * 100))
 
     # Calculate elapsed time
-    now = datetime.datetime.utcnow()
-    elapsed = (now - build.started_at).total_seconds()
+    if build.status in ['success', 'failed', 'failed-permanently'] and build.completed_at:
+        # For completed builds, use the completed_at time
+        elapsed = (build.completed_at - build.started_at).total_seconds()
+    else:
+        # For running builds, use the current time
+        now = datetime.datetime.utcnow()
+        elapsed = (now - build.started_at).total_seconds()
     progress_data['elapsed_time'] = elapsed
 
     # Parse step times and estimates

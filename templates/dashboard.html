@@ -3,7 +3,7 @@
 {% block title %}Dashboard - CICD Server{% endblock %}
 
 {% block content %}
-<div class="container-fluid py-4" data-build-in-progress="{{ build_in_progress|lower }}">
+<div class="container-fluid py-4" data-build-in-progress="{{ build_in_progress|string|lower }}">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Dashboard</h2>
         <div>
@@ -135,7 +135,20 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         var container = document.querySelector('.container-fluid');
-        var buildInProgress = container.getAttribute('data-build-in-progress') === 'true';
+        var buildInProgressAttr = container.getAttribute('data-build-in-progress');
+        console.log("data-build-in-progress attribute:", buildInProgressAttr);
+        var buildInProgress = buildInProgressAttr === 'true';
+        console.log("buildInProgress variable:", buildInProgress);
+
+        // Check if there are any running builds in the DOM
+        var runningBuilds = document.querySelectorAll('.build-status-running');
+        console.log("Running builds in DOM:", runningBuilds.length);
+
+        // If there are running builds but buildInProgress is false, set it to true
+        if (runningBuilds.length > 0 && !buildInProgress) {
+            console.log("Found running builds but buildInProgress is false, setting to true");
+            buildInProgress = true;
+        }
 
         // Set progress bar widths
         var progressBars = document.querySelectorAll('.progress-bar');
@@ -153,9 +166,48 @@
                 var buildId = element.getAttribute('data-build-id');
 
                 // Fetch the latest progress data for this build
-                fetch('/api/build_progress/' + buildId)
+                fetch('/api/build_progress/' + buildId + '?_=' + new Date().getTime())
                     .then(response => response.json())
                     .then(data => {
+                        // Check if build status has changed from running to completed
+                        if (data.status && data.status !== 'running') {
+                            console.log("Build " + buildId + " status changed to " + data.status);
+
+                            // Update the status display
+                            var row = element.closest('tr');
+                            if (row) {
+                                var statusElement = row.querySelector('.build-status');
+                                if (statusElement) {
+                                    // Remove the running class and add the appropriate class
+                                    statusElement.classList.remove('build-status-running');
+                                    statusElement.classList.add('build-status-' + data.status);
+                                    statusElement.textContent = data.status.toUpperCase();
+                                }
+
+                                // Remove progress bar and timer elements
+                                var progressContainer = row.querySelector('.mt-1');
+                                if (progressContainer) {
+                                    progressContainer.remove();
+                                }
+
+                                // Remove the elapsed time and estimated time elements
+                                element.remove();
+                                var estimatedElement = row.querySelector('.build-estimated-time');
+                                if (estimatedElement) {
+                                    estimatedElement.remove();
+                                }
+
+                                // Update the completed_at cell if it's empty
+                                var completedCell = row.cells[4]; // Assuming completed_at is the 5th column (index 4)
+                                if (completedCell && completedCell.textContent.trim() === 'N/A') {
+                                    var now = new Date();
+                                    completedCell.textContent = now.toISOString().replace('T', ' ').substring(0, 19);
+                                }
+                            }
+                            return; // Don't continue updating this build
+                        }
+
+                        // If build is still running, update as normal
                         // Update elapsed time
                         element.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
 
@@ -186,13 +238,18 @@
             });
 
             // If builds are in progress, schedule the next update
+            console.log("Checking if updates should continue: buildInProgress=", buildInProgress, "elapsedTimeElements.length=", elapsedTimeElements.length);
             if (buildInProgress && elapsedTimeElements.length > 0) {
+                console.log("Builds are in progress, updating times...");
                 setTimeout(updateBuildTimes, 1000); // Update every second
             } else if (buildInProgress) {
+                console.log("Build in progress but no elapsed time elements found, will refresh page in 10 seconds");
                 // If no elements to update but build is in progress, refresh the page after a delay
                 setTimeout(function() {
                     window.location.reload();
                 }, 10000);
+            } else {
+                console.log("No builds in progress or no elapsed time elements, stopping updates");
             }
         }
 

@@ -135,7 +135,7 @@
             // Only update if the build is running
             if (buildStatus === 'running') {
                 // Fetch the latest progress data for this build
-                fetch('/api/build_progress/' + buildId)
+                fetch('/api/build_progress/' + buildId + '?_=' + new Date().getTime())
                     .then(response => response.json())
                     .then(data => {
                         // Update elapsed time
