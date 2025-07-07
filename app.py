@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
+# Add max and min functions to Jinja2 environment
+app.jinja_env.globals.update(max=max, min=min)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_key_' + str(uuid.uuid4()))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///cicd.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -155,7 +157,16 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    builds = Build.query.order_by(Build.id.desc()).limit(10).all()
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = 10  # Number of builds per page
+
+    # Get total count for pagination
+    total_builds = Build.query.count()
+    total_pages = (total_builds + per_page - 1) // per_page  # Ceiling division
+
+    # Query builds with pagination
+    builds = Build.query.order_by(Build.id.desc()).offset((page - 1) * per_page).limit(per_page).all()
     configs = Config.query.all()
 
     # Calculate progress for each build
@@ -175,9 +186,14 @@ def dashboard():
     # Debug logging
     print(f"Dashboard: running_builds_count={running_builds_count}, queued_builds_count={queued_builds_count}, global build_in_progress={build_in_progress}, local_build_in_progress={local_build_in_progress}")
 
-    return render_template('dashboard.html', builds=builds, configs=configs, 
-                          build_in_progress=local_build_in_progress, builds_progress=builds_progress,
-                          queued_builds_count=queued_builds_count)
+    return render_template('dashboard.html', 
+                          builds=builds, 
+                          configs=configs, 
+                          build_in_progress=local_build_in_progress, 
+                          builds_progress=builds_progress,
+                          queued_builds_count=queued_builds_count,
+                          current_page=page,
+                          total_pages=total_pages)
 
 @app.route('/users')
 @login_required
