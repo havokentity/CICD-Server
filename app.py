@@ -277,31 +277,35 @@ def calculate_build_progress(build):
 
     # Calculate progress percentage
     if build.total_steps > 0:
-        # Calculate base progress from completed steps
-        completed_steps_percent = 0
-        if build.current_step > 0:
-            completed_steps_percent = ((build.current_step - 1) / build.total_steps) * 100
+        # For completed successful builds, always show 100%
+        if build.status == 'success':
+            progress_data['percent'] = 100
+        else:
+            # Calculate base progress from completed steps
+            completed_steps_percent = 0
+            if build.current_step > 0:
+                completed_steps_percent = ((build.current_step - 1) / build.total_steps) * 100
 
-        # Calculate progress of current step based on elapsed time vs estimated time
-        current_step_percent = 0
-        if build.status == 'running' and build.current_step > 0 and build.current_step <= build.total_steps:
-            try:
-                current_step_idx = str(build.current_step - 1)
-                if current_step_idx in step_times and 'start' in step_times[current_step_idx]:
-                    start_time = datetime.datetime.fromisoformat(step_times[current_step_idx]['start'])
-                    now = datetime.datetime.utcnow()
-                    elapsed_in_step = (now - start_time).total_seconds()
+            # Calculate progress of current step based on elapsed time vs estimated time
+            current_step_percent = 0
+            if build.status == 'running' and build.current_step > 0 and build.current_step <= build.total_steps:
+                try:
+                    current_step_idx = str(build.current_step - 1)
+                    if current_step_idx in step_times and 'start' in step_times[current_step_idx]:
+                        start_time = datetime.datetime.fromisoformat(step_times[current_step_idx]['start'])
+                        now = datetime.datetime.utcnow()
+                        elapsed_in_step = (now - start_time).total_seconds()
 
-                    # If we have an estimate for this step, use it to calculate progress
-                    if current_step_idx in step_estimates:
-                        estimated_step_time = step_estimates[current_step_idx]
-                        step_progress_ratio = min(1.0, elapsed_in_step / estimated_step_time)
-                        current_step_percent = (step_progress_ratio / build.total_steps) * 100
-            except (ValueError, KeyError, ZeroDivisionError):
-                pass
+                        # If we have an estimate for this step, use it to calculate progress
+                        if current_step_idx in step_estimates:
+                            estimated_step_time = step_estimates[current_step_idx]
+                            step_progress_ratio = min(1.0, elapsed_in_step / estimated_step_time)
+                            current_step_percent = (step_progress_ratio / build.total_steps) * 100
+                except (ValueError, KeyError, ZeroDivisionError):
+                    pass
 
-        # Combine completed steps and current step progress
-        progress_data['percent'] = min(100, int(completed_steps_percent + current_step_percent))
+            # Combine completed steps and current step progress
+            progress_data['percent'] = min(100, int(completed_steps_percent + current_step_percent))
 
     # Calculate elapsed time
     if build.status in ['success', 'failed', 'failed-permanently'] and build.completed_at:
