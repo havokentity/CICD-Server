@@ -288,6 +288,12 @@
         socket.on('build_progress_update', function(data) {
             console.log('Received build progress update via WebSocket:', data);
 
+            // Validate the data before processing
+            if (!data || !data.build_id || !data.current_step || !data.total_steps || data.current_step <= 0 || data.total_steps <= 0) {
+                console.log('Invalid build progress data received:', data);
+                return;
+            }
+
             // Find the element for this build
             var element = document.querySelector('.build-elapsed-time[data-build-id="' + data.build_id + '"]');
             if (!element) {
@@ -296,17 +302,19 @@
             }
 
             // Update elapsed time
-            element.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+            if (data.elapsed_time && data.elapsed_time.formatted) {
+                element.textContent = 'Elapsed: ' + data.elapsed_time.formatted;
+            }
 
             // Update estimated remaining time if available
             var estimatedElement = document.querySelector('.build-estimated-time[data-build-id="' + data.build_id + '"]');
-            if (estimatedElement && data.estimated_remaining) {
+            if (estimatedElement && data.estimated_remaining && data.estimated_remaining.formatted) {
                 estimatedElement.textContent = 'Est. remaining: ' + data.estimated_remaining.formatted;
             }
 
             // Update progress bar if needed
             var row = element.closest('tr');
-            if (row && data.percent !== undefined) {
+            if (row && data.percent !== undefined && data.percent >= 0) {
                 var progressBar = row.querySelector('.progress-bar');
                 if (progressBar) {
                     // Update progress bar width

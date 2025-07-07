@@ -6,18 +6,14 @@ This module contains the webhook API endpoint for triggering builds from externa
 
 from flask import request, jsonify
 import json
-import datetime
-import threading
 
-from cicd_server import app, db, build_in_progress, build_lock, socketio
-from cicd_server.models import Build, Config
-from cicd_server.services.build_service import run_build
+from cicd_server import app, logger
+from cicd_server.models import Config
+from cicd_server.services.build_service import trigger_build_with_config
 
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
     """Webhook endpoint for triggering builds from external systems"""
-    global build_in_progress
-
     # Verify API token
     token = request.headers.get('X-API-Token')
 
@@ -39,89 +35,31 @@ def webhook():
         else:
             return jsonify({'status': 'error', 'message': f'Configuration "{config_name}" not found'}), 404
 
-    with build_lock:
-        # Check if a build is already in progress
-        if build_in_progress:
-            # Check if the queue is full for this specific configuration
-            queued_builds_count = Build.query.filter_by(status='queued', config_id=config.id).count()
-            if queued_builds_count >= config.max_queue_length:
-                return jsonify({
-                    'status': 'error', 
-                    'message': f'Build queue for "{config.name}" is full (max {config.max_queue_length}). Try again later.'
-                }), 429  # 429 Too Many Requests
+    # Get branch from payload or use default
+    branch = data.get('branch', 'main')
 
-            # Find the highest queue position
-            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(Build.queue_position.isnot(None)).scalar() or 0
+    # Trigger the build using the centralized function
+    build, status, message = trigger_build_with_config(config, branch, 'webhook', data)
 
-            # Add the build to the queue
-            branch = data.get('branch', 'main')
-            payload_json = json.dumps(data)
-
-            build = Build(
-                status='queued',
-                branch=branch,
-                project_path=config.project_path,
-                triggered_by='webhook',
-                payload=payload_json,
-                config_id=config.id,
-                queue_position=highest_position + 1
-            )
-
-            db.session.add(build)
-            db.session.commit()
-
-            # Emit WebSocket event for build status update
-            socketio.emit('build_status_update', {
-                'build_id': build.id,
-                'status': build.status,
-                'config_id': config.id,
-                'config_name': config.name,
-                'triggered_by': build.triggered_by,
-                'branch': build.branch,
-                'queue_position': build.queue_position
-            })
-
-            return jsonify({
-                'status': 'queued', 
-                'message': f'Build queued (position {build.queue_position}) using configuration "{config.name}"', 
-                'build_id': build.id,
-                'config': config.name,
-                'queue_position': build.queue_position
-            })
-
-        # No build is in progress, start this one
-        branch = data.get('branch', 'main')
-        payload_json = json.dumps(data)
-
-        build = Build(
-            status='pending',
-            branch=branch,
-            project_path=config.project_path,
-            started_at=datetime.datetime.utcnow(),
-            triggered_by='webhook',
-            payload=payload_json,  # Store the payload
-            config_id=config.id
-        )
-
-        db.session.add(build)
-        db.session.commit()
-
-        # Emit WebSocket event for build status update
-        socketio.emit('build_status_update', {
-            'build_id': build.id,
-            'status': build.status,
-            'config_id': config.id,
-            'config_name': config.name,
-            'triggered_by': build.triggered_by,
-            'branch': build.branch
-        })
-
-        # Start build in a separate thread
-        threading.Thread(target=run_build, args=(build.id, branch, config.project_path, config.build_steps)).start()
-
+    if status == 'error':
         return jsonify({
-            'status': 'success', 
-            'message': f'Build triggered using configuration "{config.name}"', 
+            'status': 'error',
+            'message': message
+        }), 429  # 429 Too Many Requests
+
+    if status == 'queued':
+        return jsonify({
+            'status': 'queued',
+            'message': message,
             'build_id': build.id,
-            'config': config.name
+            'config': config.name,
+            'queue_position': build.queue_position
         })
+
+    # Status must be 'success'
+    return jsonify({
+        'status': 'success',
+        'message': message,
+        'build_id': build.id,
+        'config': config.name
+    })
