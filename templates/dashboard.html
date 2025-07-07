@@ -216,6 +216,38 @@
             bar.style.width = progress + '%';
         });
 
+        // Store the latest build ID we've seen
+        var latestBuildId = null;
+
+        // Function to check for new builds
+        function checkForNewBuilds() {
+            console.log('Checking for new builds...');
+            fetch('/api/latest_build?_=' + new Date().getTime())
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Latest build data:', data);
+
+                    // If this is our first check, just store the latest build ID
+                    if (latestBuildId === null) {
+                        latestBuildId = data.latest_build_id;
+                        console.log('Initial latest build ID:', latestBuildId);
+                    } 
+                    // If we have a new build and it was triggered by a webhook, refresh the page
+                    else if (data.latest_build_id > latestBuildId && data.triggered_by === 'webhook') {
+                        console.log('New build detected! Refreshing page...');
+                        window.location.reload();
+                    }
+
+                    // Schedule the next check
+                    setTimeout(checkForNewBuilds, 5000); // Check every 5 seconds
+                })
+                .catch(error => {
+                    console.error('Error checking for new builds:', error);
+                    // Even if there's an error, keep checking
+                    setTimeout(checkForNewBuilds, 5000);
+                });
+        }
+
         // Function to update build times via AJAX
         function updateBuildTimes() {
             // Find all running builds that need time updates
@@ -319,6 +351,9 @@
         if (buildInProgress) {
             updateBuildTimes();
         }
+
+        // Start checking for new builds regardless of whether there's a build in progress
+        checkForNewBuilds();
     });
 </script>
 {% endblock %}
