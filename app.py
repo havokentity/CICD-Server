@@ -351,6 +351,45 @@ def trigger_build():
         flash('Build triggered successfully')
         return redirect(url_for('dashboard'))
 
+@app.route('/api/build_progress/<int:build_id>', methods=['GET'])
+@login_required
+def api_build_progress(build_id):
+    """API endpoint to get build progress data for AJAX updates"""
+    build = Build.query.get_or_404(build_id)
+    progress_data = calculate_build_progress(build)
+
+    # Format times for display
+    formatted_data = {
+        'percent': progress_data['percent'],
+        'current_step': progress_data['current_step'],
+        'total_steps': progress_data['total_steps'],
+        'elapsed_time': {
+            'seconds': progress_data['elapsed_time'],
+            'formatted': '{:d}:{:02d}:{:02d}'.format(
+                int(progress_data['elapsed_time']//3600), 
+                int((progress_data['elapsed_time']//60)%60), 
+                int(progress_data['elapsed_time']%60)
+            )
+        },
+        'steps_overdue': progress_data['steps_overdue'],
+        'status': build.status
+    }
+
+    # Add estimated remaining time if available
+    if progress_data['estimated_remaining'] is not None:
+        formatted_data['estimated_remaining'] = {
+            'seconds': progress_data['estimated_remaining'],
+            'formatted': '{:d}:{:02d}:{:02d}'.format(
+                int(progress_data['estimated_remaining']//3600), 
+                int((progress_data['estimated_remaining']//60)%60), 
+                int(progress_data['estimated_remaining']%60)
+            )
+        }
+    else:
+        formatted_data['estimated_remaining'] = None
+
+    return jsonify(formatted_data)
+
 @app.route('/api/webhook', methods=['POST'])
 def webhook():
     global build_in_progress
