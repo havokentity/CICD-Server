@@ -416,7 +416,24 @@ def run_build(build_id, branch, project_path, build_steps):
             with build_lock:
                 build_in_progress = False
 
+def mark_abandoned_builds():
+    """
+    Mark any builds that are still in 'pending' or 'running' state as 'failed-permanently'.
+    This is called at server startup to handle builds that were interrupted by a server shutdown.
+    """
+    with app.app_context():
+        abandoned_builds = Build.query.filter(Build.status.in_(['pending', 'running'])).all()
+        for build in abandoned_builds:
+            build.status = 'failed-permanently'
+            build.completed_at = datetime.datetime.utcnow()
+            build.log += f"\nBuild marked as FAILED PERMANENTLY due to server restart at {build.completed_at}\n"
+        if abandoned_builds:
+            db.session.commit()
+            logger.info(f"Marked {len(abandoned_builds)} abandoned builds as failed-permanently")
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+    # Mark any pending or running builds as failed-permanently
+    mark_abandoned_builds()
     app.run(debug=True)
