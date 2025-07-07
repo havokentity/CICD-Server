@@ -301,7 +301,7 @@
 
                 // Started at cell
                 const startedCell = document.createElement('td');
-                startedCell.textContent = new Date().toLocaleString();
+                startedCell.textContent = data.started_at ? new Date(data.started_at).toLocaleString(undefined, { hour12: false }) : 'N/A';
 
                 // Add elapsed time
                 const elapsedDiv = document.createElement('div');
@@ -398,6 +398,14 @@
 
             // If the build is transitioning from queued to running, add progress bar
             if (data.status === 'running' && statusCell) {
+                // Update the started_at field if it's available
+                if (data.started_at) {
+                    const startedCell = row.cells[4]; // Assuming started_at is the 5th column (index 4)
+                    if (startedCell && startedCell.textContent.trim() === 'N/A') {
+                        startedCell.textContent = new Date(data.started_at).toLocaleString(undefined, { hour12: false });
+                    }
+                }
+
                 // Check if we already have a progress bar
                 const existingProgressBar = statusCell.querySelector('.progress');
                 if (!existingProgressBar) {
@@ -452,7 +460,7 @@
             if (data.status !== 'running' && data.status !== 'queued' && data.completed_at) {
                 const completedCell = row.cells[5]; // Assuming completed_at is the 6th column (index 5)
                 if (completedCell && completedCell.textContent.trim() === 'N/A') {
-                    completedCell.textContent = new Date(data.completed_at).toLocaleString();
+                    completedCell.textContent = new Date(data.completed_at).toLocaleString(undefined, { hour12: false });
                 }
 
                 // If the build is successful, remove the estimated time element
@@ -546,7 +554,7 @@
 
                 // Started at cell
                 var startedCell = document.createElement('td');
-                startedCell.textContent = new Date().toLocaleString();
+                startedCell.textContent = new Date().toLocaleString(undefined, { hour12: false });
 
                 // Add elapsed time
                 var elapsedDiv = document.createElement('div');

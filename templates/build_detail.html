@@ -245,7 +245,7 @@
                 if (data.status !== 'running' && data.status !== 'queued' && data.completed_at) {
                     var completedCell = document.querySelector('tr:nth-child(6) td'); // Assuming completed_at is the 6th row
                     if (completedCell && completedCell.textContent.trim() === 'N/A') {
-                        completedCell.textContent = new Date(data.completed_at).toLocaleString();
+                        completedCell.textContent = new Date(data.completed_at).toLocaleString(undefined, { hour12: false });
                     }
 
                     // Refresh the page to show the final status

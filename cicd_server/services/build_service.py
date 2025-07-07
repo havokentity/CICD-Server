@@ -333,6 +333,13 @@ def run_build(build_id, branch, project_path, build_steps):
             build = Build.query.get(build_id)
             build.status = 'running'
 
+            # Set the started_at timestamp if it's not already set
+            if not build.started_at:
+                build.started_at = datetime.datetime.utcnow()
+
+            # Always commit the changes to ensure they're saved
+            db.session.commit()
+
             # Start the progress update thread
             progress_thread = threading.Thread(
                 target=send_progress_updates, 
@@ -351,7 +358,8 @@ def run_build(build_id, branch, project_path, build_steps):
                 'config_id': build.config_id,
                 'config_name': build.config.name,
                 'triggered_by': build.triggered_by,
-                'branch': build.branch
+                'branch': build.branch,
+                'started_at': build.started_at.isoformat() if build.started_at else None
             })
 
             # Log the build start
