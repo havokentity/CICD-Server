@@ -6,7 +6,7 @@ This is the main entry point for the CICD Server application.
 
 from cicd_server import app, db
 from cicd_server.services.build_service import mark_abandoned_builds
-from cicd_server.utils.migration import migrate_to_multiple_configs
+from cicd_server.utils.migration import migrate_to_multiple_configs, migrate_step_times_format
 
 # Import all modules to register routes and API endpoints
 from cicd_server.routes import auth, dashboard, user, build, config
@@ -18,6 +18,7 @@ if __name__ == '__main__':
 
     # Run migrations
     migrate_to_multiple_configs()
+    migrate_step_times_format()
 
     # Mark any pending or running builds as failed-permanently
     mark_abandoned_builds()

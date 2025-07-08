@@ -36,8 +36,7 @@ class Build(db.Model):
     payload = db.Column(db.Text, default='{}')  # Store the webhook payload as JSON string
     total_steps = db.Column(db.Integer, default=0)
     current_step = db.Column(db.Integer, default=0)
-    step_times = db.Column(db.Text, default='{}')  # JSON string storing step start/end times
-    step_estimates = db.Column(db.Text, default='{}')  # JSON string storing estimated times for steps
+    step_times = db.Column(db.Text, default='{}')  # JSON string storing time each step took from the start of the build
     queue_position = db.Column(db.Integer, default=None, nullable=True)  # Position in the build queue (null if not queued)
 
     # Foreign key to Config
