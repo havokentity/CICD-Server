@@ -14,7 +14,7 @@ import time
 
 from cicd_server import app, db, build_in_progress, build_lock, logger, socketio
 from cicd_server.models import Build
-from cicd_server.utils.helpers import get_nested_value
+from cicd_server.utils.helpers import get_nested_value, format_time_duration, prepare_time_data, prepare_estimated_remaining_data, prepare_progress_update_data
 
 from threading import local
 build_progress = {}  # Dictionary to store build progress data
@@ -86,36 +86,14 @@ def send_progress_updates(build_id, similar_build, stop_event):
                 # Calculate progress and send update
                 progress_data = calculate_build_progress(temp_build)
 
-                # Prepare the estimated_remaining data if available
-                estimated_remaining_data = None
-                if progress_data['estimated_remaining'] is not None:
-                    remaining_seconds = progress_data['estimated_remaining']
-                    estimated_remaining_data = {
-                        'seconds': remaining_seconds,
-                        'formatted': '{:d}:{:02d}:{:02d}'.format(
-                            int(remaining_seconds//3600), 
-                            int((remaining_seconds//60)%60), 
-                            int(remaining_seconds%60)
-                        )
-                    }
-
-                socketio.emit('build_progress_update', {
-                    'build_id': build.id,
-                    'status': build.status,
-                    'current_step': current_step,   # Use shared memory value
-                    'total_steps': total_steps,     # Use shared memory value
-                    'percent': progress_data['percent'],
-                    'elapsed_time': {
-                        'seconds': progress_data['elapsed_time'],
-                        'formatted': '{:d}:{:02d}:{:02d}'.format(
-                            int(progress_data['elapsed_time']//3600), 
-                            int((progress_data['elapsed_time']//60)%60), 
-                            int(progress_data['elapsed_time']%60)
-                        )
-                    },
-                    'estimated_remaining': estimated_remaining_data,
-                    'steps_overdue': progress_data['steps_overdue']
-                })
+                # Prepare the progress update data and emit it
+                update_data = prepare_progress_update_data(
+                    build, 
+                    progress_data, 
+                    current_step=current_step, 
+                    total_steps=total_steps
+                )
+                socketio.emit('build_progress_update', update_data)
 
                 # Sleep for 1 second before sending the next update
                 time.sleep(1)
@@ -451,36 +429,9 @@ def run_build(build_id, branch, project_path, build_steps):
                 # Emit WebSocket event for build progress update
                 progress_data = calculate_build_progress(build)
 
-                # Prepare the estimated_remaining data if available
-                estimated_remaining_data = None
-                if progress_data['estimated_remaining'] is not None:
-                    remaining_seconds = progress_data['estimated_remaining']
-                    estimated_remaining_data = {
-                        'seconds': remaining_seconds,
-                        'formatted': '{:d}:{:02d}:{:02d}'.format(
-                            int(remaining_seconds//3600), 
-                            int((remaining_seconds//60)%60), 
-                            int(remaining_seconds%60)
-                        )
-                    }
-
-                socketio.emit('build_progress_update', {
-                    'build_id': build.id,
-                    'status': build.status,
-                    'current_step': build.current_step,
-                    'total_steps': build.total_steps,
-                    'percent': progress_data['percent'],
-                    'elapsed_time': {
-                        'seconds': progress_data['elapsed_time'],
-                        'formatted': '{:d}:{:02d}:{:02d}'.format(
-                            int(progress_data['elapsed_time']//3600), 
-                            int((progress_data['elapsed_time']//60)%60), 
-                            int(progress_data['elapsed_time']%60)
-                        )
-                    },
-                    'estimated_remaining': estimated_remaining_data,
-                    'steps_overdue': progress_data['steps_overdue']
-                })
+                # Prepare the progress update data and emit it
+                update_data = prepare_progress_update_data(build, progress_data)
+                socketio.emit('build_progress_update', update_data)
 
                 # Replace variables in the step with values from the payload
                 processed_step = step
@@ -565,29 +516,12 @@ def run_build(build_id, branch, project_path, build_steps):
             # Send a final progress update with 100% completion
             progress_data = calculate_build_progress(build)
 
-            # For completed builds, estimated remaining time is 0
-            estimated_remaining_data = {
-                'seconds': 0,
-                'formatted': '0:00:00'
-            }
+            # Set estimated_remaining to 0 for completed builds
+            progress_data['estimated_remaining'] = 0
 
-            socketio.emit('build_progress_update', {
-                'build_id': build.id,
-                'status': build.status,
-                'current_step': build.current_step,
-                'total_steps': build.total_steps,
-                'percent': 100,  # Force 100% for completed builds
-                'elapsed_time': {
-                    'seconds': progress_data['elapsed_time'],
-                    'formatted': '{:d}:{:02d}:{:02d}'.format(
-                        int(progress_data['elapsed_time']//3600), 
-                        int((progress_data['elapsed_time']//60)%60), 
-                        int(progress_data['elapsed_time']%60)
-                    )
-                },
-                'estimated_remaining': estimated_remaining_data,  # Zero remaining time for completed builds
-                'steps_overdue': progress_data['steps_overdue']
-            })
+            # Prepare the progress update data and emit it with 100% completion
+            update_data = prepare_progress_update_data(build, progress_data, force_percent=100)
+            socketio.emit('build_progress_update', update_data)
 
             # Also emit a final log update
             socketio.emit('build_log_update', {
@@ -617,29 +551,12 @@ def run_build(build_id, branch, project_path, build_steps):
             # Send a final progress update for the failed build
             progress_data = calculate_build_progress(build)
 
-            # For failed builds, estimated remaining time is 0
-            estimated_remaining_data = {
-                'seconds': 0,
-                'formatted': '0:00:00'
-            }
+            # Set estimated_remaining to 0 for failed builds
+            progress_data['estimated_remaining'] = 0
 
-            socketio.emit('build_progress_update', {
-                'build_id': build.id,
-                'status': build.status,
-                'current_step': build.current_step,
-                'total_steps': build.total_steps,
-                'percent': progress_data['percent'],  # Use calculated percentage for failed builds
-                'elapsed_time': {
-                    'seconds': progress_data['elapsed_time'],
-                    'formatted': '{:d}:{:02d}:{:02d}'.format(
-                        int(progress_data['elapsed_time']//3600), 
-                        int((progress_data['elapsed_time']//60)%60), 
-                        int(progress_data['elapsed_time']%60)
-                    )
-                },
-                'estimated_remaining': estimated_remaining_data,  # Zero remaining time for failed builds
-                'steps_overdue': progress_data['steps_overdue']
-            })
+            # Prepare the progress update data and emit it
+            update_data = prepare_progress_update_data(build, progress_data)
+            socketio.emit('build_progress_update', update_data)
 
             # Also emit a final log update
             socketio.emit('build_log_update', {

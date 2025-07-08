@@ -10,6 +10,7 @@ from flask_login import login_required
 from cicd_server import app
 from cicd_server.models import Build
 from cicd_server.services.build_service import calculate_build_progress
+from cicd_server.utils.helpers import prepare_time_data, prepare_estimated_remaining_data
 
 @app.route('/api/build_progress/<int:build_id>', methods=['GET'])
 @login_required
@@ -23,32 +24,13 @@ def api_build_progress(build_id):
         'percent': progress_data['percent'],
         'current_step': progress_data['current_step'],
         'total_steps': progress_data['total_steps'],
-        'elapsed_time': {
-            'seconds': progress_data['elapsed_time'],
-            'formatted': '{:d}:{:02d}:{:02d}'.format(
-                int(progress_data['elapsed_time']//3600), 
-                int((progress_data['elapsed_time']//60)%60), 
-                int(progress_data['elapsed_time']%60)
-            )
-        },
+        'elapsed_time': prepare_time_data(progress_data['elapsed_time']),
         'steps_overdue': progress_data['steps_overdue'],
         'status': build.status,
         'config_id': build.config_id,
-        'config_name': build.config.name
+        'config_name': build.config.name,
+        'estimated_remaining': prepare_estimated_remaining_data(progress_data)
     }
-
-    # Add estimated remaining time if available
-    if progress_data['estimated_remaining'] is not None:
-        formatted_data['estimated_remaining'] = {
-            'seconds': progress_data['estimated_remaining'],
-            'formatted': '{:d}:{:02d}:{:02d}'.format(
-                int(progress_data['estimated_remaining']//3600), 
-                int((progress_data['estimated_remaining']//60)%60), 
-                int(progress_data['estimated_remaining']%60)
-            )
-        }
-    else:
-        formatted_data['estimated_remaining'] = None
 
     response = jsonify(formatted_data)
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
