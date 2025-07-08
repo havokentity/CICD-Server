@@ -90,11 +90,6 @@ def prepare_progress_update_data(build, progress_data, current_step=None, total_
     total = total_steps if total_steps is not None else build.total_steps
     percent = force_percent if force_percent is not None else progress_data['percent']
 
-    log_caller()
-
-    print("OOOOH NOOYOY")
-    print(progress_data['elapsed_time'])
-    print(progress_data['estimated_remaining'])
     # Prepare the data structure
     data = {
         'build_id': build.id,

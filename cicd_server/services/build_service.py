@@ -6,6 +6,7 @@ This module contains the build processing logic for the CICD Server application.
 
 import datetime
 import json
+import random
 import subprocess
 import re
 import logging
@@ -40,8 +41,6 @@ def send_progress_updates(build_id, similar_build, stop_event):
                 # If build doesn't exist, stop sending updates
                 if not build:
                     break
-
-                print("send progress update for build", build_id)
 
                 # Get current_step and total_steps from shared memory if available
                 # When reading from the shared memory:
@@ -148,6 +147,20 @@ def calculate_elapsed_time(build):
 
     return elapsed_time
 
+def calculate_total_time(build):
+    """Calculate total time for a build."""
+    if not build.started_at:
+        return 0
+
+    now = datetime.datetime.utcnow()
+    total_time = (now - build.started_at).total_seconds()
+
+    # If the build is completed, use completed_at instead of started_at
+    if build.completed_at:
+        total_time = (build.completed_at - build.started_at).total_seconds()
+
+    return total_time
+
 def calculate_remaining_time(build, similar_build=None):
     """Calculate estimated remaining time for a build based on similar builds."""
     if not build.started_at or not build.total_steps or build.total_steps <= 0:
@@ -181,67 +194,48 @@ def calculate_remaining_time(build, similar_build=None):
 
 def calculate_build_progress(build, similar_build=None):
     """Calculate build progress and elapsed time."""
-    print("Calculate build progress: " + str(build.id))
     estimated_remaining = None
 
-    log_caller()
-
-    stepTimes = None
     now = datetime.datetime.utcnow()
     elapsed_time = calculate_elapsed_time(build)
 
+    if build.total_steps < 1:
+        logger.warning(f"Build #{build.id} has total_steps < 1, setting to 1 to avoid division by zero")
+        build.total_steps = 1
+
+    build_percent = build.current_step / build.total_steps
+
     # Log all properties of similar_build
     if similar_build:
-        # print(f"=== All attributes of similar_build (ID: {similar_build.id}) ===")
-        # for attr_name in dir(similar_build):
-        #     # Skip private/internal attributes that start with underscore
-        #     if not attr_name.startswith('_'):
-        #         try:
-        #             attr_value = getattr(similar_build, attr_name)
-        #             # Skip methods/functions
-        #             if not callable(attr_value):
-        #                 print(f"{attr_name}: {attr_value}")
-        #         except Exception as e:
-        #             print(f"{attr_name}: <Error accessing attribute: {e}>")
-        # print("=== End of similar_build attributes ===")
 
         estimated_remaining = calculate_remaining_time(build, similar_build)
 
-        # # Measure time between end and start time of similar build in seconds
-        # if similar_build.completed_at and similar_build.started_at:
-        #     previous_elapsed_time = (similar_build.completed_at - similar_build.started_at).total_seconds()
-        #     estimated_remaining = previous_elapsed_time - elapsed_time
-        #     logger.info(f"Estimated remaining time based on similar build #{similar_build.id}: {elapsed_time} seconds")
-        #
-        #
-        #     # Log last step times from similar build
-        #     if similar_build.step_times:
-        #         try:
-        #             step_times = json.loads(similar_build.step_times)
-        #             step_times = list(step_times.values())
-        #             print("JAJAJA: " + similar_build.step_times)
-        #
-        #             last_step_time = step_times[similar_build.total_steps - 1]
-        #             print(f"Last step time from similar build #{similar_build.id}: {last_step_time} seconds")
-        #         except json.JSONDecodeError as e:
-        #             logger.error(f"Error decoding step_times JSON for similar build #{similar_build.id}: {str(e)}")
+        # logger.info(f"Similar build found: ID={similar_build.id}, Status={similar_build.status}, "
+        #             f"Current Step={similar_build.current_step}, Total Steps={similar_build.total_steps}, "
+        #             f"Completed At={similar_build.completed_at}, Step Times={similar_build.step_times}")
 
-        logger.info(f"Similar build found: ID={similar_build.id}, Status={similar_build.status}, "
-                    f"Current Step={similar_build.current_step}, Total Steps={similar_build.total_steps}, "
-                    f"Completed At={similar_build.completed_at}, Step Times={similar_build.step_times}")
+        build_total_time = calculate_total_time(similar_build)
+        if build_total_time > 0:
+            # build_percent = (elapsed_time / build_total_time)
+            build_percent = (build.current_step / build.total_steps + elapsed_time / build_total_time) * 0.5
 
         # Steptimes from csv step_times
         try:
-            stepTimes = json.loads(similar_build.step_times)
+            step_times = json.loads(similar_build.step_times)
+            step_times = list(step_times.values())
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding step_times JSON for similar build #{similar_build.id}: {str(e)}")
-            stepTimes = None
+            step_times = None
     else:
         logger.info("No similar build found for progress updates")
 
+
+    # Round the build_percent to 2 decimal places
+    build_percent = round(build_percent * 100, 0)
+
     # Initialize progress data
     progress_data = {
-        'percent': 0,
+        'percent': build_percent,  # Random percentage for initial state
         'current_step': build.current_step,
         'total_steps': build.total_steps,
         'elapsed_time': elapsed_time,
@@ -252,69 +246,6 @@ def calculate_build_progress(build, similar_build=None):
 
     return progress_data
 
-    # If build hasn't started or has no steps, return default data
-    if not build.started_at or build.total_steps == 0:
-        return progress_data
-
-    # Initialize step_times
-    step_times = json.loads(build.step_times) if build.step_times else {}
-
-    # Calculate progress percentage
-    if build.total_steps > 0:
-        # For completed successful builds, always show 100%
-        if build.status == 'success':
-            progress_data['percent'] = 100
-        else:
-            # Calculate progress based on step count (e.g., step 3 out of 4 steps is 75%)
-            if build.current_step > 0:
-                # Calculate the percentage based on completed steps
-                progress_data['percent'] = min(100, int((build.current_step / build.total_steps) * 100))
-
-    # Calculate elapsed time
-    if build.status in ['success', 'failed', 'failed-permanently'] and build.completed_at:
-        # For completed builds, use the completed_at time
-        elapsed = (build.completed_at - build.started_at).total_seconds()
-    else:
-        # For running builds, use the current time
-        now = datetime.datetime.utcnow()
-        elapsed = (now - build.started_at).total_seconds()
-    progress_data['elapsed_time'] = elapsed
-
-    # Calculate estimated remaining time for running builds
-    if build.status == 'running' and build.current_step > 0 and build.total_steps > 0:
-        # Calculate average time per step based on elapsed time and current step
-        avg_time_per_step = elapsed / build.current_step
-
-        # Calculate remaining steps
-        remaining_steps = build.total_steps - build.current_step
-
-        # Calculate estimated remaining time
-        estimated_remaining = avg_time_per_step * remaining_steps
-
-        # Store the estimated remaining time
-        progress_data['estimated_remaining'] = estimated_remaining
-
-    # Store step times in progress_data
-    try:
-        progress_data['step_times'] = step_times
-    except (json.JSONDecodeError, ValueError, KeyError) as e:
-        # If there's an error parsing the JSON, just continue with default values
-        pass
-
-    print("====================")
-    # Log
-    try:
-
-        logger.info(f"Build #{build.id} progress: {progress_data['percent']}% complete, ")
-        # f"current step: {build.current_step}/{build.total_steps}, "
-        # f"elapsed time: {format_time_duration(progress_data['elapsed_time'])}, "
-        # f"estimated remaining: {prepare_estimated_remaining_data(progress_data['estimated_remaining'])}")
-    except Exception as e:
-        logger.error(f"Error logging build progress for build #{build.id}: {str(e)}")
-
-    print("====================")
-
-    return progress_data
 
 
 def trigger_build_with_config(config, branch, triggered_by, payload=None):
