@@ -1,26 +1,9 @@
 ﻿"""
-CICD Server Application
+CICD Server Application - DEPRECATED
 
-This is the main entry point for the CICD Server application.
+This file is deprecated and has been replaced by app.py.
+Please use app.py as the entry point for the CICD Server application.
+
+app.py includes all the functionality from this file, plus it uses socketio.run()
+which is more appropriate for a Flask application with Socket.IO integration.
 """
-
-from cicd_server import app, db
-from cicd_server.services.build_service import mark_abandoned_builds
-from cicd_server.utils.migration import migrate_to_multiple_configs, migrate_step_times_format
-
-# Import all modules to register routes and API endpoints
-from cicd_server.routes import auth, dashboard, user, build, config
-from cicd_server.api import build_api, webhook
-
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-
-    # Run migrations
-    migrate_to_multiple_configs()
-    migrate_step_times_format()
-
-    # Mark any pending or running builds as failed-permanently
-    mark_abandoned_builds()
-
-    app.run(debug=True)
