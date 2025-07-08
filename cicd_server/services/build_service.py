@@ -14,25 +14,21 @@ import time
 
 from cicd_server import app, db, build_in_progress, build_lock, logger, socketio
 from cicd_server.models import Build
-from cicd_server.utils.helpers import get_nested_value, format_time_duration, prepare_time_data, prepare_estimated_remaining_data, prepare_progress_update_data
+from cicd_server.utils.helpers import get_nested_value, format_time_duration, prepare_time_data, \
+    prepare_estimated_remaining_data, prepare_progress_update_data, log_caller
 
 from threading import local
+
 build_progress = {}  # Dictionary to store build progress data
 
 from threading import Lock
+
 build_progress_lock = Lock()
+
 
 def send_progress_updates(build_id, similar_build, stop_event):
     """Send progress updates every second for a running build."""
     logger.info(f"Start progress updates thread for build: {build_id}")
-
-    useStepTimes = False
-    # Log all properties of similar_build
-    if similar_build:
-        useStepTimes = True
-        logger.info(f"Similar build found: ID={similar_build.id}, Status={similar_build.status}, "
-                    f"Current Step={similar_build.current_step}, Total Steps={similar_build.total_steps}, "
-                    f"Completed At={similar_build.completed_at}, Step Times={similar_build.step_times}")
 
     with app.app_context():
         while not stop_event.is_set():
@@ -53,9 +49,9 @@ def send_progress_updates(build_id, similar_build, stop_event):
                     current_step = build_progress.get(build_id, {}).get('current_step', build.current_step)
                     total_steps = build_progress.get(build_id, {}).get('total_steps', build.total_steps)
 
-
                 # Print total steps of the build
-                print(f"Build #{build.id} - Status: {build.status}, Current Step: {current_step}, Total Steps: {total_steps}")
+                print(
+                    f"Build #{build.id} - Status: {build.status}, Current Step: {current_step}, Total Steps: {total_steps}")
 
                 # Handle queued builds differently
                 if build.status == 'queued':
@@ -73,7 +69,7 @@ def send_progress_updates(build_id, similar_build, stop_event):
                     break
 
                 # Skip sending updates if the build data is invalid (e.g., during database updates)
-                if build.current_step <= 0 or build.total_steps <= 0:
+                if current_step <= 0 or total_steps <= 0:
                     time.sleep(0.5)  # Short sleep to avoid tight loop
                     continue
 
@@ -84,17 +80,16 @@ def send_progress_updates(build_id, similar_build, stop_event):
                 temp_build.total_steps = total_steps
 
                 # Calculate progress and send update
-                progress_data = calculate_build_progress(temp_build)
+                progress_data = calculate_build_progress(temp_build, similar_build)
 
                 # Prepare the progress update data and emit it
                 update_data = prepare_progress_update_data(
-                    build, 
-                    progress_data, 
-                    current_step=current_step, 
+                    build,
+                    progress_data,
+                    current_step=current_step,
                     total_steps=total_steps
                 )
                 socketio.emit('build_progress_update', update_data)
-
                 # Sleep for 1 second before sending the next update
                 time.sleep(1)
             except Exception as e:
@@ -125,7 +120,6 @@ def get_most_recent_similar_build(build_id):
         if build is None or build.config_id is None or build.total_steps is None:
             return None
 
-
         # Query for successful builds with the same config_id and total_steps
         # Exclude the current build from the results
         # Order by completed_at in descending order to get the most recent build first
@@ -139,18 +133,124 @@ def get_most_recent_similar_build(build_id):
         # Return the build if found, otherwise None
         return similar_build
 
-def calculate_build_progress(build):
+
+def calculate_elapsed_time(build):
+    """Calculate elapsed time for a build."""
+    if not build.started_at:
+        return 0
+
+    now = datetime.datetime.utcnow()
+    elapsed_time = (now - build.started_at).total_seconds()
+
+    # If the build is completed, use completed_at instead of started_at
+    if build.completed_at:
+        elapsed_time = (build.completed_at - build.started_at).total_seconds()
+
+    return elapsed_time
+
+def calculate_remaining_time(build, similar_build=None):
+    """Calculate estimated remaining time for a build based on similar builds."""
+    if not build.started_at or not build.total_steps or build.total_steps <= 0:
+        return None
+
+    elapsed_time = calculate_elapsed_time(build)
+
+    if elapsed_time < 0:
+        elapsed_time = 0
+
+    # If the build is completed, return 0 remaining time
+    if build.status in ['success', 'failed', 'failed-permanently'] and build.completed_at:
+        return 0
+
+    estimated_remaining = None
+
+    if similar_build:
+        # Calculate estimated remaining time based on similar build's elapsed time
+        if similar_build.completed_at and similar_build.started_at:
+            previous_elapsed_time = (similar_build.completed_at - similar_build.started_at).total_seconds()
+            estimated_remaining = previous_elapsed_time - elapsed_time
+
+    # If no similar build is found, estimate remaining time based on current step
+    if estimated_remaining is None and build.current_step > 0 and build.total_steps > 0:
+        avg_time_per_step = elapsed_time / build.current_step
+        remaining_steps = build.total_steps - build.current_step
+        estimated_remaining = avg_time_per_step * remaining_steps
+
+    return estimated_remaining
+
+
+def calculate_build_progress(build, similar_build=None):
     """Calculate build progress and elapsed time."""
+    print("Calculate build progress: " + str(build.id))
+    estimated_remaining = None
+
+    log_caller()
+
+    stepTimes = None
+    now = datetime.datetime.utcnow()
+    elapsed_time = calculate_elapsed_time(build)
+
+    # Log all properties of similar_build
+    if similar_build:
+        # print(f"=== All attributes of similar_build (ID: {similar_build.id}) ===")
+        # for attr_name in dir(similar_build):
+        #     # Skip private/internal attributes that start with underscore
+        #     if not attr_name.startswith('_'):
+        #         try:
+        #             attr_value = getattr(similar_build, attr_name)
+        #             # Skip methods/functions
+        #             if not callable(attr_value):
+        #                 print(f"{attr_name}: {attr_value}")
+        #         except Exception as e:
+        #             print(f"{attr_name}: <Error accessing attribute: {e}>")
+        # print("=== End of similar_build attributes ===")
+
+        estimated_remaining = calculate_remaining_time(build, similar_build)
+
+        # # Measure time between end and start time of similar build in seconds
+        # if similar_build.completed_at and similar_build.started_at:
+        #     previous_elapsed_time = (similar_build.completed_at - similar_build.started_at).total_seconds()
+        #     estimated_remaining = previous_elapsed_time - elapsed_time
+        #     logger.info(f"Estimated remaining time based on similar build #{similar_build.id}: {elapsed_time} seconds")
+        #
+        #
+        #     # Log last step times from similar build
+        #     if similar_build.step_times:
+        #         try:
+        #             step_times = json.loads(similar_build.step_times)
+        #             step_times = list(step_times.values())
+        #             print("JAJAJA: " + similar_build.step_times)
+        #
+        #             last_step_time = step_times[similar_build.total_steps - 1]
+        #             print(f"Last step time from similar build #{similar_build.id}: {last_step_time} seconds")
+        #         except json.JSONDecodeError as e:
+        #             logger.error(f"Error decoding step_times JSON for similar build #{similar_build.id}: {str(e)}")
+
+        logger.info(f"Similar build found: ID={similar_build.id}, Status={similar_build.status}, "
+                    f"Current Step={similar_build.current_step}, Total Steps={similar_build.total_steps}, "
+                    f"Completed At={similar_build.completed_at}, Step Times={similar_build.step_times}")
+
+        # Steptimes from csv step_times
+        try:
+            stepTimes = json.loads(similar_build.step_times)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding step_times JSON for similar build #{similar_build.id}: {str(e)}")
+            stepTimes = None
+    else:
+        logger.info("No similar build found for progress updates")
+
     # Initialize progress data
     progress_data = {
         'percent': 0,
         'current_step': build.current_step,
         'total_steps': build.total_steps,
-        'elapsed_time': 0,
-        'estimated_remaining': None,
+        'elapsed_time': elapsed_time,
+        'estimated_remaining': estimated_remaining,
         'step_times': {},
         'steps_overdue': False
     }
+
+    return progress_data
 
     # If build hasn't started or has no steps, return default data
     if not build.started_at or build.total_steps == 0:
@@ -201,7 +301,21 @@ def calculate_build_progress(build):
         # If there's an error parsing the JSON, just continue with default values
         pass
 
+    print("====================")
+    # Log
+    try:
+
+        logger.info(f"Build #{build.id} progress: {progress_data['percent']}% complete, ")
+        # f"current step: {build.current_step}/{build.total_steps}, "
+        # f"elapsed time: {format_time_duration(progress_data['elapsed_time'])}, "
+        # f"estimated remaining: {prepare_estimated_remaining_data(progress_data['estimated_remaining'])}")
+    except Exception as e:
+        logger.error(f"Error logging build progress for build #{build.id}: {str(e)}")
+
+    print("====================")
+
     return progress_data
+
 
 def trigger_build_with_config(config, branch, triggered_by, payload=None):
     """
@@ -236,7 +350,8 @@ def trigger_build_with_config(config, branch, triggered_by, payload=None):
                 return None, 'error', f'Maximum queue length ({config.max_queue_length}) reached for configuration "{config.name}".'
 
             # Find the highest queue position
-            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(Build.queue_position.isnot(None)).scalar() or 0
+            highest_position = db.session.query(db.func.max(Build.queue_position)).filter(
+                Build.queue_position.isnot(None)).scalar() or 0
 
             # Add the build to the queue
             build = Build(
@@ -287,6 +402,7 @@ def trigger_build_with_config(config, branch, triggered_by, payload=None):
 
         return build, 'success', f'Build triggered using configuration "{config.name}"'
 
+
 def start_next_queued_build():
     """Start the next build in the queue if any."""
     global build_in_progress
@@ -318,12 +434,14 @@ def start_next_queued_build():
 
                 # Start the build in a separate thread
                 import threading
-                threading.Thread(target=run_build, args=(next_build.id, next_build.branch, next_build.project_path, config.build_steps)).start()
+                threading.Thread(target=run_build, args=(next_build.id, next_build.branch, next_build.project_path,
+                                                         config.build_steps)).start()
 
                 logger.info(f"Started next queued build #{next_build.id}")
                 return True
 
             return False
+
 
 def run_build(build_id, branch, project_path, build_steps):
     """Run a build with the specified parameters."""
@@ -358,17 +476,6 @@ def run_build(build_id, branch, project_path, build_steps):
             # Parse the payload JSON
             payload = json.loads(build.payload) if build.payload else {}
 
-            # Emit WebSocket event for build status change
-            socketio.emit('build_status_update', {
-                'build_id': build.id,
-                'status': build.status,
-                'config_id': build.config_id,
-                'config_name': build.config.name,
-                'triggered_by': build.triggered_by,
-                'branch': build.branch,
-                'started_at': build.started_at.isoformat() if build.started_at else None
-            })
-
             # Log the build start
             log_message = f"Build #{build_id} started at {build.started_at}\n"
             log_message += f"Branch: {branch}\n"
@@ -396,6 +503,17 @@ def run_build(build_id, branch, project_path, build_steps):
                     f"Similar build status: {similar_build.status}, steps: {similar_build.current_step}/{similar_build.total_steps}")
             else:
                 logger.info(f"No similar build found for build #{build_id}")
+
+            # Emit WebSocket event for build status change
+            socketio.emit('build_status_update', {
+                'build_id': build.id,
+                'status': build.status,
+                'config_id': build.config_id,
+                'config_name': build.config.name,
+                'triggered_by': build.triggered_by,
+                'branch': build.branch,
+                'started_at': build.started_at.isoformat() if build.started_at else None
+            })
 
             # Start the progress update thread
             progress_thread = threading.Thread(
@@ -427,7 +545,7 @@ def run_build(build_id, branch, project_path, build_steps):
                 db.session.commit()
 
                 # Emit WebSocket event for build progress update
-                progress_data = calculate_build_progress(build)
+                progress_data = calculate_build_progress(build, similar_build)
 
                 # Prepare the progress update data and emit it
                 update_data = prepare_progress_update_data(build, progress_data)
@@ -580,6 +698,7 @@ def run_build(build_id, branch, project_path, build_steps):
 
             # Start the next queued build if any
             start_next_queued_build()
+
 
 def mark_abandoned_builds():
     """
