@@ -16,17 +16,46 @@ from cicd_server import app, db, build_in_progress, build_lock, logger, socketio
 from cicd_server.models import Build
 from cicd_server.utils.helpers import get_nested_value
 
-def send_progress_updates(build_id, stop_event):
+from threading import local
+build_progress = {}  # Dictionary to store build progress data
+
+from threading import Lock
+build_progress_lock = Lock()
+
+def send_progress_updates(build_id, similar_build, stop_event):
     """Send progress updates every second for a running build."""
+    logger.info(f"Start progress updates thread for build: {build_id}")
+
+    useStepTimes = False
+    # Log all properties of similar_build
+    if similar_build:
+        useStepTimes = True
+        logger.info(f"Similar build found: ID={similar_build.id}, Status={similar_build.status}, "
+                    f"Current Step={similar_build.current_step}, Total Steps={similar_build.total_steps}, "
+                    f"Completed At={similar_build.completed_at}, Step Times={similar_build.step_times}")
+
     with app.app_context():
         while not stop_event.is_set():
             try:
                 # Get the latest build data from the database
                 build = Build.query.get(build_id)
+                # db.session.refresh(build)  # Force refresh from database
 
                 # If build doesn't exist, stop sending updates
                 if not build:
                     break
+
+                print("send progress update for build", build_id)
+
+                # Get current_step and total_steps from shared memory if available
+                # When reading from the shared memory:
+                with build_progress_lock:
+                    current_step = build_progress.get(build_id, {}).get('current_step', build.current_step)
+                    total_steps = build_progress.get(build_id, {}).get('total_steps', build.total_steps)
+
+
+                # Print total steps of the build
+                print(f"Build #{build.id} - Status: {build.status}, Current Step: {current_step}, Total Steps: {total_steps}")
 
                 # Handle queued builds differently
                 if build.status == 'queued':
@@ -48,13 +77,33 @@ def send_progress_updates(build_id, stop_event):
                     time.sleep(0.5)  # Short sleep to avoid tight loop
                     continue
 
+                # Create a temporary build object with the correct current_step and total_steps
+                # for the calculate_build_progress function
+                temp_build = build
+                temp_build.current_step = current_step
+                temp_build.total_steps = total_steps
+
                 # Calculate progress and send update
-                progress_data = calculate_build_progress(build)
+                progress_data = calculate_build_progress(temp_build)
+
+                # Prepare the estimated_remaining data if available
+                estimated_remaining_data = None
+                if progress_data['estimated_remaining'] is not None:
+                    remaining_seconds = progress_data['estimated_remaining']
+                    estimated_remaining_data = {
+                        'seconds': remaining_seconds,
+                        'formatted': '{:d}:{:02d}:{:02d}'.format(
+                            int(remaining_seconds//3600), 
+                            int((remaining_seconds//60)%60), 
+                            int(remaining_seconds%60)
+                        )
+                    }
+
                 socketio.emit('build_progress_update', {
                     'build_id': build.id,
                     'status': build.status,
-                    'current_step': build.current_step,
-                    'total_steps': build.total_steps,
+                    'current_step': current_step,   # Use shared memory value
+                    'total_steps': total_steps,     # Use shared memory value
                     'percent': progress_data['percent'],
                     'elapsed_time': {
                         'seconds': progress_data['elapsed_time'],
@@ -64,8 +113,8 @@ def send_progress_updates(build_id, stop_event):
                             int(progress_data['elapsed_time']%60)
                         )
                     },
-                    'estimated_remaining': None,
-                    'steps_overdue': False
+                    'estimated_remaining': estimated_remaining_data,
+                    'steps_overdue': progress_data['steps_overdue']
                 })
 
                 # Sleep for 1 second before sending the next update
@@ -73,6 +122,44 @@ def send_progress_updates(build_id, stop_event):
             except Exception as e:
                 logger.exception(f"Error sending progress update for build #{build_id}: {str(e)}")
                 time.sleep(1)  # Sleep even on error to avoid tight loop
+
+
+def get_most_recent_similar_build(build_id):
+    """
+    Get the most recent successful build with the same configuration and same number of steps
+    as the specified build.
+
+    Args:
+        build_id (int): The ID of the build to find a similar build for
+
+    Returns:
+        Build: The most recent successful build matching the criteria, or None if no match found
+    """
+    # Perform null check on input parameter
+    if build_id is None:
+        return None
+
+    with app.app_context():
+        # First, get the build with the specified ID
+        build = Build.query.get(build_id)
+
+        # If the build doesn't exist or has missing config_id or total_steps, return None
+        if build is None or build.config_id is None or build.total_steps is None:
+            return None
+
+
+        # Query for successful builds with the same config_id and total_steps
+        # Exclude the current build from the results
+        # Order by completed_at in descending order to get the most recent build first
+        similar_build = Build.query.filter(
+            Build.config_id == build.config_id,
+            Build.total_steps == build.total_steps,
+            Build.status == 'success',  # Only include successful builds
+            Build.id != build_id  # Exclude the current build
+        ).order_by(Build.completed_at.desc()).first()  # .first() ensures only one build is returned
+
+        # Return the build if found, otherwise None
+        return similar_build
 
 def calculate_build_progress(build):
     """Calculate build progress and elapsed time."""
@@ -114,6 +201,20 @@ def calculate_build_progress(build):
         now = datetime.datetime.utcnow()
         elapsed = (now - build.started_at).total_seconds()
     progress_data['elapsed_time'] = elapsed
+
+    # Calculate estimated remaining time for running builds
+    if build.status == 'running' and build.current_step > 0 and build.total_steps > 0:
+        # Calculate average time per step based on elapsed time and current step
+        avg_time_per_step = elapsed / build.current_step
+
+        # Calculate remaining steps
+        remaining_steps = build.total_steps - build.current_step
+
+        # Calculate estimated remaining time
+        estimated_remaining = avg_time_per_step * remaining_steps
+
+        # Store the estimated remaining time
+        progress_data['estimated_remaining'] = estimated_remaining
 
     # Store step times in progress_data
     try:
@@ -263,20 +364,18 @@ def run_build(build_id, branch, project_path, build_steps):
             build = Build.query.get(build_id)
             build.status = 'running'
 
+            # Initialize the shared memory object with proper values
+            build_progress[build_id] = {
+                'current_step': 0,
+                'total_steps': 0  # Will be updated after we calculate steps
+            }
+
             # Set the started_at timestamp if it's not already set
             if not build.started_at:
                 build.started_at = datetime.datetime.utcnow()
 
             # Always commit the changes to ensure they're saved
             db.session.commit()
-
-            # Start the progress update thread
-            progress_thread = threading.Thread(
-                target=send_progress_updates, 
-                args=(build_id, progress_stop_event),
-                daemon=True
-            )
-            progress_thread.start()
 
             # Parse the payload JSON
             payload = json.loads(build.payload) if build.payload else {}
@@ -303,10 +402,30 @@ def run_build(build_id, branch, project_path, build_steps):
             # Initialize step tracking
             steps = [s for s in build_steps.strip().split('\n') if s.strip()]
             build.total_steps = len(steps)
+            build_progress[build_id]['total_steps'] = len(steps)
             build.current_step = 0
             build.step_times = json.dumps({})
             build.log = log_message
             db.session.commit()
+
+            logger.info(f"Build #{build.id} started with {build.total_steps} steps")
+
+            similar_build = get_most_recent_similar_build(build_id)
+
+            if similar_build:
+                logger.info(f"Found similar build #{similar_build.id} for build #{build_id}")
+                logger.info(
+                    f"Similar build status: {similar_build.status}, steps: {similar_build.current_step}/{similar_build.total_steps}")
+            else:
+                logger.info(f"No similar build found for build #{build_id}")
+
+            # Start the progress update thread
+            progress_thread = threading.Thread(
+                target=send_progress_updates,
+                args=(build_id, similar_build, progress_stop_event),
+                daemon=True
+            )
+            progress_thread.start()
 
             # Execute build steps
             success = True
@@ -318,6 +437,9 @@ def run_build(build_id, branch, project_path, build_steps):
 
                 # Update current step
                 build.current_step = step_idx + 1
+                # When updating the shared memory:
+                with build_progress_lock:
+                    build_progress[build_id]['current_step'] = step_idx + 1
 
                 # Record time from build start
                 current_time = datetime.datetime.utcnow()
@@ -328,6 +450,20 @@ def run_build(build_id, branch, project_path, build_steps):
 
                 # Emit WebSocket event for build progress update
                 progress_data = calculate_build_progress(build)
+
+                # Prepare the estimated_remaining data if available
+                estimated_remaining_data = None
+                if progress_data['estimated_remaining'] is not None:
+                    remaining_seconds = progress_data['estimated_remaining']
+                    estimated_remaining_data = {
+                        'seconds': remaining_seconds,
+                        'formatted': '{:d}:{:02d}:{:02d}'.format(
+                            int(remaining_seconds//3600), 
+                            int((remaining_seconds//60)%60), 
+                            int(remaining_seconds%60)
+                        )
+                    }
+
                 socketio.emit('build_progress_update', {
                     'build_id': build.id,
                     'status': build.status,
@@ -342,8 +478,8 @@ def run_build(build_id, branch, project_path, build_steps):
                             int(progress_data['elapsed_time']%60)
                         )
                     },
-                    'estimated_remaining': None,
-                    'steps_overdue': False
+                    'estimated_remaining': estimated_remaining_data,
+                    'steps_overdue': progress_data['steps_overdue']
                 })
 
                 # Replace variables in the step with values from the payload
@@ -428,6 +564,13 @@ def run_build(build_id, branch, project_path, build_steps):
 
             # Send a final progress update with 100% completion
             progress_data = calculate_build_progress(build)
+
+            # For completed builds, estimated remaining time is 0
+            estimated_remaining_data = {
+                'seconds': 0,
+                'formatted': '0:00:00'
+            }
+
             socketio.emit('build_progress_update', {
                 'build_id': build.id,
                 'status': build.status,
@@ -442,8 +585,8 @@ def run_build(build_id, branch, project_path, build_steps):
                         int(progress_data['elapsed_time']%60)
                     )
                 },
-                'estimated_remaining': None,  # No remaining time for completed builds
-                'steps_overdue': False
+                'estimated_remaining': estimated_remaining_data,  # Zero remaining time for completed builds
+                'steps_overdue': progress_data['steps_overdue']
             })
 
             # Also emit a final log update
@@ -473,6 +616,13 @@ def run_build(build_id, branch, project_path, build_steps):
 
             # Send a final progress update for the failed build
             progress_data = calculate_build_progress(build)
+
+            # For failed builds, estimated remaining time is 0
+            estimated_remaining_data = {
+                'seconds': 0,
+                'formatted': '0:00:00'
+            }
+
             socketio.emit('build_progress_update', {
                 'build_id': build.id,
                 'status': build.status,
@@ -487,8 +637,8 @@ def run_build(build_id, branch, project_path, build_steps):
                         int(progress_data['elapsed_time']%60)
                     )
                 },
-                'estimated_remaining': None,  # No remaining time for completed builds
-                'steps_overdue': False
+                'estimated_remaining': estimated_remaining_data,  # Zero remaining time for failed builds
+                'steps_overdue': progress_data['steps_overdue']
             })
 
             # Also emit a final log update
@@ -503,6 +653,10 @@ def run_build(build_id, branch, project_path, build_steps):
                 progress_stop_event.set()
                 # Wait for the thread to finish, but with a timeout
                 progress_thread.join(timeout=2.0)
+
+            # Clean up shared memory
+            if build_id in build_progress:
+                del build_progress[build_id]
 
             with build_lock:
                 build_in_progress = False
